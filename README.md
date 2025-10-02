@@ -5,6 +5,7 @@ A simple and streamlined Python package for time series imputation using Singula
 ## Features
 
 - **Automatic rank estimation** based on variance energy threshold (default: 95%)
+- **Uncertainty estimation** with three methods (Monte Carlo, Bootstrap, Hybrid)
 - **Data validation** ensures proper datetime index, ordering, and data quality
 - **Scikit-learn style API** with `fit()`, `transform()`, and `fit_transform()` methods
 - **Minimal dependencies** (numpy, pandas, scikit-learn)
@@ -48,6 +49,26 @@ df_imputed = imputer.fit_transform(df)
 imputer.fit(df)
 df_imputed = imputer.transform(df)
 ```
+
+### With Uncertainty Estimation
+
+```python
+# Get imputed values with confidence intervals
+imputer = Imputer()
+df_imputed, uncertainty = imputer.fit_transform(
+    df,
+    return_uncertainty=True,
+    uncertainty_method='monte_carlo',  # or 'bootstrap', 'hybrid'
+    n_repeats=100
+)
+
+# Extract confidence intervals
+df_lower, df_upper = imputer.get_confidence_intervals(df_imputed, uncertainty)
+
+print(f"RMSE: {uncertainty['rmse']:.3f}")
+```
+
+See [UNCERTAINTY_GUIDE.md](UNCERTAINTY_GUIDE.md) for detailed documentation.
 
 ### Custom Parameters
 
