@@ -635,11 +635,219 @@ class Imputer:
         
         return df_imputed
     
+    def _learn_distance_uncertainty_relationship(
+        self, 
+        df: pd.DataFrame, 
+        n_samples: int = 50
+    ):
+        """
+        Learn empirical relationship between distance to nearest observation
+        and prediction error through targeted validation sampling.
+        
+        This method:
+        1. Masks random observed values one at a time
+        2. Imputes and measures error
+        3. Records distance to nearest remaining observation
+        4. Fits a model relating distance to error
+        
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Input data with missing values
+        n_samples : int
+            Number of validation samples to collect
+            
+        Returns
+        -------
+        callable
+            Function that maps distance (days) to uncertainty multiplier
+        """
+        distances = []
+        errors = []
+        
+        X_array = df.values
+        
+        for _ in range(n_samples):
+            # Randomly mask one observation per column
+            masked_df = df.copy()
+            mask_locations = {}
+            
+            for col in df.columns:
+                observed_idx = df[col].dropna().index
+                if len(observed_idx) > 2:
+                    # Mask a random observation
+                    mask_idx = np.random.choice(observed_idx)
+                    mask_locations[col] = (mask_idx, masked_df.loc[mask_idx, col])
+                    masked_df.loc[mask_idx, col] = np.nan
+            
+            if not mask_locations:
+                continue
+            
+            # Impute
+            X_masked = masked_df.values
+            try:
+                X_imputed = iterative_svd_impute(
+                    X_masked,
+                    rank=self.rank_,
+                    max_iters=self.max_iters,
+                    tol=self.tol,
+                    scaler=self.scaler
+                )
+                imputed_df = pd.DataFrame(
+                    X_imputed, 
+                    index=masked_df.index, 
+                    columns=masked_df.columns
+                )
+            except:
+                continue
+            
+            # Calculate error and distance for each masked location
+            for col, (mask_idx, true_val) in mask_locations.items():
+                pred_val = imputed_df.loc[mask_idx, col]
+                error = abs(pred_val - true_val)
+                
+                # Distance to nearest observation (in days)
+                remaining_obs = masked_df[col].dropna().index
+                if len(remaining_obs) > 0:
+                    time_diffs = abs((remaining_obs - mask_idx).total_seconds() / 86400)
+                    nearest_dist = time_diffs.min()
+                    
+                    distances.append(nearest_dist)
+                    errors.append(error)
+        
+        if len(distances) == 0:
+            # No valid distances found, return identity function
+            if self.verbose:
+                print("Warning: Could not learn distance-uncertainty relationship, using identity")
+            return lambda d: 1.0
+        
+        distances = np.array(distances)
+        errors = np.array(errors)
+        
+        # Remove outliers
+        valid_mask = (errors < np.percentile(errors, 95))
+        distances = distances[valid_mask]
+        errors = errors[valid_mask]
+        
+        if len(distances) < 10:
+            # Not enough data, return identity function
+            if self.verbose:
+                print(f"Warning: Only {len(distances)} samples for distance learning, using identity")
+            return lambda d: 1.0
+        
+        # Bin by distance and compute mean error
+        try:
+            from scipy.stats import binned_statistic
+            n_bins = min(5, max(3, len(distances) // 10))
+            bin_edges = np.percentile(distances, np.linspace(0, 100, n_bins + 1))
+            bin_means, _, _ = binned_statistic(
+                distances, errors, statistic='mean', bins=bin_edges
+            )
+            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+            
+            # Fit exponential growth model: error ~ a * exp(b * distance)
+            from scipy.optimize import curve_fit
+            
+            def exp_model(d, a, b):
+                return a * np.exp(b * d)
+            
+            # Try exponential fit
+            try:
+                popt, _ = curve_fit(
+                    exp_model, bin_centers, bin_means, 
+                    p0=[bin_means[0], 0.01], maxfev=1000
+                )
+                baseline = exp_model(0, *popt)
+                if baseline > 0 and popt[1] >= 0:  # Ensure positive growth
+                    return lambda d: exp_model(d, *popt) / baseline
+            except:
+                pass
+            
+            # Fallback to linear fit
+            if len(distances) > 1:
+                slope, intercept = np.polyfit(distances, errors, 1)
+                if intercept > 0 and slope >= 0:  # Ensure positive
+                    return lambda d: (intercept + slope * d) / intercept
+        except:
+            pass
+        
+        # Final fallback: use median error ratio
+        median_dist = np.median(distances)
+        near_errors = errors[distances <= median_dist]
+        far_errors = errors[distances > median_dist]
+        
+        if len(near_errors) > 0 and len(far_errors) > 0:
+            ratio = max(1.0, np.median(far_errors) / np.median(near_errors))
+            return lambda d: 1.0 if d <= median_dist else ratio
+        
+        return lambda d: 1.0
+    
+    def _apply_proximity_adjustment(
+        self, 
+        df: pd.DataFrame, 
+        uncertainty_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        """
+        Adjust uncertainty estimates based on learned distance-error relationship.
+        
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Original data with missing values
+        uncertainty_df : pd.DataFrame
+            Initial uncertainty estimates (std or CI width)
+            
+        Returns
+        -------
+        pd.DataFrame
+            Adjusted uncertainty estimates
+        """
+        if self.verbose:
+            print("Learning distance-uncertainty relationship from data...")
+        
+        # Learn the relationship
+        distance_fn = self._learn_distance_uncertainty_relationship(df, n_samples=50)
+        
+        # Store for inspection
+        self.distance_to_uncertainty_fn_ = distance_fn
+        
+        adjusted_unc = uncertainty_df.copy()
+        
+        for col in df.columns:
+            missing_mask = df[col].isna()
+            if not missing_mask.any():
+                continue
+                
+            observed_times = df[col].dropna().index
+            
+            if len(observed_times) == 0:
+                continue
+            
+            for idx in df.index[missing_mask]:
+                # Calculate distance to nearest observation (days)
+                time_diffs = abs((observed_times - idx).total_seconds() / 86400)
+                nearest_dist = time_diffs.min()
+                
+                # Apply learned adjustment
+                multiplier = distance_fn(nearest_dist)
+                adjusted_unc.loc[idx, col] *= multiplier
+        
+        if self.verbose:
+            print(f"Applied proximity-based uncertainty adjustment")
+            # Show some example multipliers
+            test_distances = [0, 7, 30, 90, 365]
+            print("Distance -> Uncertainty multiplier:")
+            for d in test_distances:
+                print(f"  {d:4d} days: {distance_fn(d):.3f}x")
+        
+        return adjusted_unc
+    
     def fit_transform(
         self,
         X: pd.DataFrame,
         return_uncertainty: bool = False,
         uncertainty_method: str = 'monte_carlo',
+        adjust_by_proximity: bool = False,
         n_repeats: int = 100,
         n_bootstrap: int = 50,
         mask_strategy: str = 'block',
@@ -666,6 +874,9 @@ class Imputer:
         uncertainty_method : str, optional
             Method for uncertainty estimation: 'monte_carlo', 'bootstrap', or 'hybrid'
             (default: 'monte_carlo')
+        adjust_by_proximity : bool, optional
+            If True, adjust uncertainty based on learned distance-error relationship.
+            This is fully data-driven and requires no user parameters. (default: False)
         n_repeats : int, optional
             Number of Monte Carlo repeats for validation (default: 100)
         n_bootstrap : int, optional
@@ -711,6 +922,15 @@ class Imputer:
         ...     n_bootstrap=50
         ... )
         >>> df_lower, df_upper = unc['lower'], unc['upper']
+        
+        >>> # With proximity-adjusted uncertainty (data-driven)
+        >>> df_imputed, unc = imputer.fit_transform(
+        ...     df,
+        ...     return_uncertainty=True,
+        ...     uncertainty_method='hybrid',
+        ...     adjust_by_proximity=True
+        ... )
+        >>> # Uncertainty now varies based on distance to observations
         """
         if not return_uncertainty:
             # Standard behavior - no uncertainty
@@ -742,6 +962,20 @@ class Imputer:
                 X, df_imputed, n_repeats, n_bootstrap, mask_strategy,
                 frac, block_len, n_blocks, confidence, seed
             )
+        
+        # Apply proximity-based adjustment if requested
+        if adjust_by_proximity:
+            if 'std' in uncertainty_dict:
+                # Adjust standard deviation
+                uncertainty_dict['std'] = self._apply_proximity_adjustment(
+                    X, uncertainty_dict['std']
+                )
+            if 'lower' in uncertainty_dict and 'upper' in uncertainty_dict:
+                # Adjust confidence intervals
+                ci_width = (uncertainty_dict['upper'] - uncertainty_dict['lower']) / 2
+                adjusted_width = self._apply_proximity_adjustment(X, ci_width)
+                uncertainty_dict['lower'] = df_imputed - adjusted_width
+                uncertainty_dict['upper'] = df_imputed + adjusted_width
         
         return df_imputed, uncertainty_dict
     
@@ -996,6 +1230,294 @@ class Imputer:
             raise ValueError(f"Unknown method: {method}")
         
         return df_lower, df_upper
+    
+    def condition_on_observations(
+        self,
+        df_original: pd.DataFrame,
+        df_imputed: pd.DataFrame,
+        uncertainty_dict: Optional[Dict[str, Any]] = None,
+        temporal_range: float = 30.0,
+        spatial_weight: float = 0.5
+    ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, Dict[str, Any]]]:
+        """
+        Condition imputed values on known observations using Kriging.
+        
+        This method refines imputed values and reduces uncertainty by:
+        1. Temporal conditioning: Force imputed gaps to match boundary observations
+        2. Spatial conditioning: Use correlations with other series
+        3. Uncertainty reduction: Apply Kriging variance formula
+        
+        Parameters
+        ----------
+        df_original : pd.DataFrame
+            Original data with missing values (NaN)
+        df_imputed : pd.DataFrame
+            Imputed data (no NaN)
+        uncertainty_dict : dict, optional
+            Uncertainty estimates from fit_transform. If provided, will return
+            conditioned uncertainty.
+        temporal_range : float, optional
+            Characteristic time scale (days) for temporal correlation decay.
+            Default: 30 days
+        spatial_weight : float, optional
+            Weight for spatial (cross-series) conditioning [0, 1].
+            Default: 0.5 (equal weight to temporal and spatial)
+            
+        Returns
+        -------
+        pd.DataFrame or tuple
+            If uncertainty_dict is None: Returns conditioned DataFrame
+            If uncertainty_dict provided: Returns (conditioned_df, conditioned_uncertainty_dict)
+            
+        Examples
+        --------
+        >>> # Basic conditioning (no uncertainty)
+        >>> df_conditioned = imputer.condition_on_observations(df_original, df_imputed)
+        
+        >>> # With uncertainty reduction
+        >>> df_imputed, unc = imputer.fit_transform(df, return_uncertainty=True)
+        >>> df_cond, unc_cond = imputer.condition_on_observations(
+        ...     df, df_imputed, unc
+        ... )
+        """
+        df_conditioned = df_imputed.copy()
+        
+        # Compute cross-series correlation for spatial conditioning
+        corr_matrix = df_original.corr()
+        
+        if self.verbose:
+            print("Conditioning imputed values on observations...")
+            print(f"  Temporal range: {temporal_range} days")
+            print(f"  Spatial weight: {spatial_weight}")
+        
+        # Process each column
+        for col in df_original.columns:
+            missing_mask = df_original[col].isna()
+            observed_times = df_original[col].dropna().index
+            
+            if not missing_mask.any() or len(observed_times) < 2:
+                continue
+            
+            # Get other correlated series for spatial conditioning
+            other_cols = [c for c in df_original.columns if c != col]
+            correlations = corr_matrix.loc[col, other_cols].abs()
+            
+            # Process each missing value
+            for miss_time in df_original.index[missing_mask]:
+                # === TEMPORAL CONDITIONING ===
+                # Find nearest observations before and after
+                times_before = observed_times[observed_times < miss_time]
+                times_after = observed_times[observed_times > miss_time]
+                
+                temporal_correction = 0.0
+                temporal_weight_sum = 0.0
+                
+                # Kriging weights based on exponential decay
+                for obs_time in observed_times:
+                    dt_days = abs((miss_time - obs_time).total_seconds() / 86400)
+                    
+                    # Exponential correlation model
+                    correlation = np.exp(-dt_days / temporal_range)
+                    
+                    if correlation > 0.01:  # Only use significant correlations
+                        # Residual at observation point
+                        residual = df_original.loc[obs_time, col] - df_imputed.loc[obs_time, col]
+                        
+                        temporal_correction += correlation * residual
+                        temporal_weight_sum += correlation
+                
+                if temporal_weight_sum > 0:
+                    temporal_correction /= temporal_weight_sum
+                
+                # === SPATIAL CONDITIONING ===
+                spatial_correction = 0.0
+                spatial_weight_sum = 0.0
+                
+                for other_col in other_cols:
+                    if pd.notna(df_original.loc[miss_time, other_col]):
+                        # Other series has observation at this time
+                        corr_value = correlations[other_col]
+                        
+                        if corr_value > 0.3:  # Only use moderately correlated series
+                            # Check if imputation agrees with cross-series relationship
+                            # Use regression: col ~ other_col
+                            obs_mask = df_original[col].notna() & df_original[other_col].notna()
+                            if obs_mask.sum() > 5:
+                                # Simple linear relationship
+                                x = df_original.loc[obs_mask, other_col].values
+                                y = df_original.loc[obs_mask, col].values
+                                
+                                # Fit: y = a*x + b
+                                a, b = np.polyfit(x, y, 1)
+                                
+                                # Predicted value based on other series
+                                predicted = a * df_original.loc[miss_time, other_col] + b
+                                residual = predicted - df_imputed.loc[miss_time, col]
+                                
+                                spatial_correction += corr_value * residual
+                                spatial_weight_sum += corr_value
+                
+                if spatial_weight_sum > 0:
+                    spatial_correction /= spatial_weight_sum
+                
+                # === COMBINE CORRECTIONS ===
+                total_correction = (
+                    (1 - spatial_weight) * temporal_correction +
+                    spatial_weight * spatial_correction
+                )
+                
+                df_conditioned.loc[miss_time, col] = df_imputed.loc[miss_time, col] + total_correction
+        
+        if self.verbose:
+            avg_change = (df_conditioned - df_imputed).abs().mean().mean()
+            print(f"  Average adjustment: {avg_change:.4f}")
+        
+        # If uncertainty provided, reduce it based on conditioning
+        if uncertainty_dict is not None:
+            conditioned_uncertainty = self._reduce_uncertainty_kriging(
+                df_original, df_imputed, df_conditioned,
+                uncertainty_dict, temporal_range, spatial_weight
+            )
+            return df_conditioned, conditioned_uncertainty
+        
+        return df_conditioned
+    
+    def _reduce_uncertainty_kriging(
+        self,
+        df_original: pd.DataFrame,
+        df_imputed: pd.DataFrame,
+        df_conditioned: pd.DataFrame,
+        uncertainty_dict: Dict[str, Any],
+        temporal_range: float,
+        spatial_weight: float
+    ) -> Dict[str, Any]:
+        """
+        Reduce uncertainty based on Kriging variance formula.
+        
+        Kriging variance: σ²_conditioned = σ²_prior * (1 - ρ²)
+        where ρ² is the squared correlation due to conditioning.
+        """
+        conditioned_unc = uncertainty_dict.copy()
+        method = uncertainty_dict['method']
+        
+        # Compute correlation matrix
+        corr_matrix = df_original.corr()
+        
+        if method == 'monte_carlo':
+            # Adjust RMSE
+            avg_reduction = self._compute_average_kriging_reduction(
+                df_original, temporal_range, spatial_weight, corr_matrix
+            )
+            conditioned_unc['rmse'] *= np.sqrt(1 - avg_reduction)
+            conditioned_unc['mae'] *= np.sqrt(1 - avg_reduction)
+            
+        elif method in ['bootstrap', 'hybrid']:
+            # Adjust point-wise uncertainty
+            if 'std' in conditioned_unc:
+                std_df = conditioned_unc['std'].copy()
+                
+                for col in df_original.columns:
+                    missing_mask = df_original[col].isna()
+                    
+                    for miss_time in df_original.index[missing_mask]:
+                        # Compute ρ² for this specific point
+                        rho_squared = self._compute_kriging_correlation(
+                            df_original, col, miss_time,
+                            temporal_range, spatial_weight, corr_matrix
+                        )
+                        
+                        # Reduce uncertainty
+                        std_df.loc[miss_time, col] *= np.sqrt(1 - rho_squared)
+                
+                conditioned_unc['std'] = std_df
+            
+            # Adjust confidence intervals
+            if 'lower' in conditioned_unc and 'upper' in conditioned_unc:
+                # Recompute intervals with reduced std
+                ci_half_width = (conditioned_unc['upper'] - df_conditioned) * np.sqrt(
+                    1 - self._compute_average_kriging_reduction(
+                        df_original, temporal_range, spatial_weight, corr_matrix
+                    )
+                )
+                conditioned_unc['lower'] = df_conditioned - ci_half_width
+                conditioned_unc['upper'] = df_conditioned + ci_half_width
+        
+        if self.verbose:
+            print(f"  Uncertainty reduced by Kriging conditioning")
+        
+        return conditioned_unc
+    
+    def _compute_kriging_correlation(
+        self,
+        df_original: pd.DataFrame,
+        col: str,
+        miss_time: pd.Timestamp,
+        temporal_range: float,
+        spatial_weight: float,
+        corr_matrix: pd.DataFrame
+    ) -> float:
+        """
+        Compute ρ² (squared correlation) for a specific missing point.
+        
+        Returns value in [0, 1] representing conditioning strength.
+        """
+        # Temporal correlation
+        observed_times = df_original[col].dropna().index
+        
+        if len(observed_times) == 0:
+            return 0.0
+        
+        # Find closest observations
+        dt_days = np.array([abs((miss_time - t).total_seconds() / 86400) 
+                           for t in observed_times])
+        min_dt = dt_days.min()
+        
+        # Exponential decay
+        rho_temporal = np.exp(-min_dt / temporal_range)
+        
+        # Spatial correlation
+        rho_spatial = 0.0
+        other_cols = [c for c in df_original.columns if c != col]
+        
+        for other_col in other_cols:
+            if pd.notna(df_original.loc[miss_time, other_col]):
+                corr_value = abs(corr_matrix.loc[col, other_col])
+                rho_spatial = max(rho_spatial, corr_value)
+        
+        # Combine (using formula for independent contributions)
+        rho_squared = (
+            (1 - spatial_weight) * rho_temporal**2 +
+            spatial_weight * rho_spatial**2
+        )
+        
+        return min(rho_squared, 0.99)  # Cap at 0.99 to avoid numerical issues
+    
+    def _compute_average_kriging_reduction(
+        self,
+        df_original: pd.DataFrame,
+        temporal_range: float,
+        spatial_weight: float,
+        corr_matrix: pd.DataFrame
+    ) -> float:
+        """
+        Compute average ρ² across all missing values.
+        """
+        rho_squared_values = []
+        
+        for col in df_original.columns:
+            missing_mask = df_original[col].isna()
+            
+            for miss_time in df_original.index[missing_mask]:
+                rho_sq = self._compute_kriging_correlation(
+                    df_original, col, miss_time,
+                    temporal_range, spatial_weight, corr_matrix
+                )
+                rho_squared_values.append(rho_sq)
+        
+        if len(rho_squared_values) == 0:
+            return 0.0
+        
+        return np.mean(rho_squared_values)
     
     def get_params(self) -> dict:
         """
