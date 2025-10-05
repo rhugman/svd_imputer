@@ -13,7 +13,7 @@ from sklearn.preprocessing import StandardScaler
 from math import sqrt
 from statistics import mean, stdev
 
-from .preprocessing import validate_dataframe, check_sufficient_rank
+from .preprocessing import validate_dataframe, check_sufficient_rank, preprocess_for_svd, postprocess_after_svd
 
 
 def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95) -> int:
@@ -122,23 +122,28 @@ def iterative_svd_impute(
             f"rank={rank} exceeds maximum possible rank {max_possible_rank} "
             f"for matrix with shape {X.shape}"
         )
-    
+    inds = np.where(np.isnan(X))
     X_filled = X.copy()
+    X_filled, preprocessing_info = preprocess_for_svd(X_filled)
     
-    # Apply scaling if provided
-    if scaler is not None:
-        # Note: StandardScaler.fit_transform doesn't handle NaN well
-        # So we only scale after initial imputation
-        pass
     
-    # Step 1: Initialize missing values with column means
-    col_means = np.nanmean(X_filled, axis=0)
-    inds = np.where(np.isnan(X_filled))
-    X_filled[inds] = np.take(col_means, inds[1])
-    
-    # Apply scaling after initial imputation if scaler provided
-    if scaler is not None:
-        X_filled = scaler.fit_transform(X_filled)
+#    # Apply scaling if provided
+#    if scaler is not None:
+#        # Note: StandardScaler.fit_transform doesn't handle NaN well
+#        # So we only scale after initial imputation
+#        pass
+#    
+#    # Step 1: Initialize missing values with column means
+#    col_means = np.nanmean(X_filled, axis=0)
+#    #col_random = np.random.normal(col_means, col_means.shape)  # Random noise
+#    inds = np.where(np.isnan(X_filled))
+#    X_filled[inds] = np.take(col_means, inds[1]) 
+#
+#    X_filled = X_filled - col_means
+#    
+#    # Apply scaling after initial imputation if scaler provided
+#    if scaler is not None:
+#        X_filled = scaler.fit_transform(X_filled)
     
     # Step 2: Iterative updates
     converged = False
@@ -159,11 +164,12 @@ def iterative_svd_impute(
         
         # Update only the originally missing entries
         X_new = X_filled.copy()
-        X_new[inds] = X_approx[inds]
+        X_new[inds] = X_approx[inds] 
+        #X_new = X_new + col_means
         
         # Check convergence
         diff = np.linalg.norm(X_new - X_filled) / np.linalg.norm(X_filled)
-        X_filled = X_new
+        X_filled = X_new 
         
         if diff < tol:
             converged = True
@@ -177,9 +183,13 @@ def iterative_svd_impute(
             RuntimeWarning
         )
     
-    # Inverse transform if scaler was used
-    if scaler is not None:
-        X_filled = scaler.inverse_transform(X_filled)
+#    # Inverse transform if scaler was used
+#   if scaler is not None:
+#       X_filled = scaler.inverse_transform(X_filled)
+#   
+#   X_filled = X_filled + col_means
+
+    X_filled = postprocess_after_svd(X_filled, preprocessing_info)
     
     return X_filled
 
@@ -307,6 +317,7 @@ def _monte_carlo_validation(
     rng = np.random.default_rng(seed)
     rmse_list = []
     mae_list = []
+    imputed_list = []
 
     for i in range(n_repeats):
         s = None if seed is None else int(rng.integers(1 << 30))
@@ -333,6 +344,7 @@ def _monte_carlo_validation(
             tol=tol,
             scaler=scaler
         )
+        imputed_list.append(X_imputed)
 
         # Compute error only on masked positions
         true_vals = X[masked_positions]
@@ -354,7 +366,8 @@ def _monte_carlo_validation(
         "RMSE": summarize(rmse_list),
         "MAE": summarize(mae_list),
         "raw_rmse": rmse_list,
-        "raw_mae": mae_list
+        "raw_mae": mae_list,
+        "raw_imputed":imputed_list,
     }
 
 
@@ -1287,7 +1300,8 @@ class Imputer:
             'rmse_ci': results['RMSE']['95%_CI'],
             'mae_ci': results['MAE']['95%_CI'],
             'raw_rmse': results['raw_rmse'],
-            'raw_mae': results['raw_mae']
+            'raw_mae': results['raw_mae'],
+            'raw_imputed':results["raw_imputed"]
         }
     
     def _uncertainty_bootstrap(

@@ -152,3 +152,63 @@ def check_sufficient_rank(df: pd.DataFrame, min_rank: int = 1) -> None:
         raise ValueError(
             f"Data dimensions {df.shape} are insufficient for SVD imputation"
         )
+
+
+
+def detrend_timeseries(X):
+    """Detrend each column (time series)"""
+    X_detrended = np.copy(X)
+    trends = np.zeros_like(X)
+    
+    for col in range(X.shape[1]):
+        mask = ~np.isnan(X[:, col])
+        if mask.sum() > 2:  # Need at least 2 points
+            # Fit trend on observed values only
+            t = np.arange(len(X))[mask]
+            values = X[mask, col]
+            trend_coef = np.polyfit(t, values, deg=1)
+            
+            # Store trend for all time points
+            trends[:, col] = np.polyval(trend_coef, np.arange(len(X)))
+            X_detrended[:, col] = X[:, col] - trends[:, col]
+    
+    return X_detrended, trends
+
+def standardize_columns(X):
+    """Standardize each column to mean=0, std=1"""
+    means = np.nanmean(X, axis=0)
+    stds = np.nanstd(X, axis=0)
+    X_standardized = (X - means) / stds
+    return X_standardized, means, stds
+
+
+def preprocess_for_svd(data):
+    """Full preprocessing pipeline"""
+    if isinstance(data, pd.DataFrame):
+        X = data.copy().values.astype(float)
+    elif isinstance(data, np.ndarray):
+        X = data.copy().astype(float)
+    # 1. Detrend (if non-stationary)
+    X_detrended, trends = detrend_timeseries(X)
+    
+    # 2. Standardize (always good)
+    X_std, means, stds = standardize_columns(X)
+    
+    # 3. Fill with mean (now mean=0 after standardization)
+    X_filled = np.where(np.isnan(X_std), 0, X_std)
+    if isinstance(data, pd.DataFrame):
+        X_filled = pd.DataFrame(X_filled,columns=data.columns,index=data.index)
+    
+    return X_filled, (trends, means, stds)
+
+def postprocess_after_svd(X_imputed, preprocessing_info):
+    """Reverse preprocessing"""
+    trends, means, stds = preprocessing_info
+    
+    # 1. Unstandardize
+    X = X_imputed * stds + means
+    
+    # 2. Add trends back
+    #X = X + trends
+    
+    return X
