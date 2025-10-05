@@ -227,7 +227,8 @@ def _block_mask_time(X: np.ndarray, block_len: int = 5, n_blocks: int = 1,
     n_rows, _ = X.shape
     for _ in range(n_blocks):
         start = rng.integers(0, max(1, n_rows - block_len + 1))
-        rows = range(start, start + block_len)
+        end = min(start + block_len, n_rows)  # Ensure we don't exceed array bounds
+        rows = range(start, end)
         # Hide those rows across all columns that are observed
         for r in rows:
             for c in range(X.shape[1]):
@@ -882,233 +883,21 @@ class Imputer:
         
         return df_imputed
     
-    def _learn_distance_uncertainty_relationship(
-        self, 
-        df: pd.DataFrame, 
-        n_samples: int = 50
-    ):
-        """
-        Learn empirical relationship between distance to nearest observation
-        and prediction error through targeted validation sampling.
-        
-        This method:
-        1. Masks random observed values one at a time
-        2. Imputes and measures error
-        3. Records distance to nearest remaining observation
-        4. Fits a model relating distance to error
-        
-        Parameters
-        ----------
-        df : pd.DataFrame
-            Input data with missing values
-        n_samples : int
-            Number of validation samples to collect
-            
-        Returns
-        -------
-        callable
-            Function that maps distance (days) to uncertainty multiplier
-        """
-        distances = []
-        errors = []
-        
-        
-        for _ in range(n_samples):
-            # Randomly mask one observation per column
-            masked_df = df.copy()
-            mask_locations = {}
-            
-            for col in df.columns:
-                observed_idx = df[col].dropna().index
-                if len(observed_idx) > 2:
-                    # Mask a random observation
-                    mask_idx = np.random.choice(observed_idx)
-                    mask_locations[col] = (mask_idx, masked_df.loc[mask_idx, col])
-                    masked_df.loc[mask_idx, col] = np.nan
-            
-            if not mask_locations:
-                continue
-            
-            # Impute
-            X_masked = masked_df.values
-            try:
-                X_imputed = iterative_svd_impute(
-                    X_masked,
-                    rank=self.rank_,
-                    max_iters=self.max_iters,
-                    tol=self.tol
-                )
-                imputed_df = pd.DataFrame(
-                    X_imputed, 
-                    index=masked_df.index, 
-                    columns=masked_df.columns
-                )
-            except:
-                continue
-            
-            # Calculate error and distance for each masked location
-            for col, (mask_idx, true_val) in mask_locations.items():
-                pred_val = imputed_df.loc[mask_idx, col]
-                error = abs(pred_val - true_val)
-                
-                # Distance to nearest observation (in days)
-                remaining_obs = masked_df[col].dropna().index
-                if len(remaining_obs) > 0:
-                    time_diffs = abs((remaining_obs - mask_idx).total_seconds() / 86400)
-                    nearest_dist = time_diffs.min()
-                    
-                    distances.append(nearest_dist)
-                    errors.append(error)
-        
-        if len(distances) == 0:
-            # No valid distances found, return identity function
-            if self.verbose:
-                print("Warning: Could not learn distance-uncertainty relationship, using identity")
-            return lambda d: 1.0
-        
-        distances = np.array(distances)
-        errors = np.array(errors)
-        
-        # Remove outliers
-        valid_mask = (errors < np.percentile(errors, 95))
-        distances = distances[valid_mask]
-        errors = errors[valid_mask]
-        
-        if len(distances) < 10:
-            # Not enough data, return identity function
-            if self.verbose:
-                print(f"Warning: Only {len(distances)} samples for distance learning, using identity")
-            return lambda d: 1.0
-        
-        # Bin by distance and compute mean error
-        try:
-            from scipy.stats import binned_statistic
-            n_bins = min(5, max(3, len(distances) // 10))
-            bin_edges = np.percentile(distances, np.linspace(0, 100, n_bins + 1))
-            bin_means, _, _ = binned_statistic(
-                distances, errors, statistic='mean', bins=bin_edges
-            )
-            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-            
-            # Fit exponential growth model: error ~ a * exp(b * distance)
-            from scipy.optimize import curve_fit
-            
-            def exp_model(d, a, b):
-                return a * np.exp(b * d)
-            
-            # Try exponential fit
-            try:
-                popt, _ = curve_fit(
-                    exp_model, bin_centers, bin_means, 
-                    p0=[bin_means[0], 0.01], maxfev=1000
-                )
-                baseline = exp_model(0, *popt)
-                if baseline > 0 and popt[1] >= 0:  # Ensure positive growth
-                    return lambda d: exp_model(d, *popt) / baseline
-            except:
-                pass
-            
-            # Fallback to linear fit
-            if len(distances) > 1:
-                slope, intercept = np.polyfit(distances, errors, 1)
-                if intercept > 0 and slope >= 0:  # Ensure positive
-                    return lambda d: (intercept + slope * d) / intercept
-        except:
-            pass
-        
-        # Final fallback: use median error ratio
-        median_dist = np.median(distances)
-        near_errors = errors[distances <= median_dist]
-        far_errors = errors[distances > median_dist]
-        
-        if len(near_errors) > 0 and len(far_errors) > 0:
-            ratio = max(1.0, np.median(far_errors) / np.median(near_errors))
-            return lambda d: 1.0 if d <= median_dist else ratio
-        
-        return lambda d: 1.0
-    
-    def _apply_proximity_adjustment(
-        self, 
-        df: pd.DataFrame, 
-        uncertainty_df: pd.DataFrame
-    ) -> pd.DataFrame:
-        """
-        Adjust uncertainty estimates based on learned distance-error relationship.
-        
-        Parameters
-        ----------
-        df : pd.DataFrame
-            Original data with missing values
-        uncertainty_df : pd.DataFrame
-            Initial uncertainty estimates (std or CI width)
-            
-        Returns
-        -------
-        pd.DataFrame
-            Adjusted uncertainty estimates
-        """
-        if self.verbose:
-            print("Learning distance-uncertainty relationship from data...")
-        
-        # Learn the relationship
-        distance_fn = self._learn_distance_uncertainty_relationship(df, n_samples=50)
-        
-        # Store for inspection
-        self.distance_to_uncertainty_fn_ = distance_fn
-        
-        adjusted_unc = uncertainty_df.copy()
-        
-        for col in df.columns:
-            missing_mask = df[col].isna()
-            if not missing_mask.any():
-                continue
-                
-            observed_times = df[col].dropna().index
-            
-            if len(observed_times) == 0:
-                continue
-            
-            for idx in df.index[missing_mask]:
-                # Calculate distance to nearest observation (days)
-                time_diffs = abs((observed_times - idx).total_seconds() / 86400)
-                nearest_dist = time_diffs.min()
-                
-                # Apply learned adjustment
-                multiplier = distance_fn(nearest_dist)
-                adjusted_unc.loc[idx, col] *= multiplier
-        
-        if self.verbose:
-            print(f"Applied proximity-based uncertainty adjustment")
-            # Show some example multipliers
-            test_distances = [0, 7, 30, 90, 365]
-            print("Distance -> Uncertainty multiplier:")
-            for d in test_distances:
-                print(f"  {d:4d} days: {distance_fn(d):.3f}x")
-        
-        return adjusted_unc
-    
     def fit_transform(
         self,
         X: pd.DataFrame,
         return_uncertainty: bool = False,
-        uncertainty_method: str = 'monte_carlo',
-        adjust_by_proximity: bool = False,
         n_repeats: int = 100,
-        n_bootstrap: int = 50,
         mask_strategy: str = 'block',
         frac: float = 0.1,
         block_len: int = 5,
         n_blocks: int = 1,
-        confidence: float = 0.95,
         seed: Optional[int] = None
     ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, Dict[str, Any]]]:
         """
         Fit the imputer and transform the data in one step.
         
-        Optionally compute uncertainty estimates using one of three methods:
-        - 'monte_carlo': Constant uncertainty band from validation (fast)
-        - 'bootstrap': Point-wise uncertainty via resampling (slower, more accurate)
-        - 'hybrid': Combines both approaches
+        Optionally compute uncertainty estimates using Monte Carlo validation.
         
         Parameters
         ----------
@@ -1116,16 +905,8 @@ class Imputer:
             Input DataFrame with datetime index
         return_uncertainty : bool, optional
             Whether to return uncertainty estimates (default: False)
-        uncertainty_method : str, optional
-            Method for uncertainty estimation: 'monte_carlo', 'bootstrap', or 'hybrid'
-            (default: 'monte_carlo')
-        adjust_by_proximity : bool, optional
-            If True, adjust uncertainty based on learned distance-error relationship.
-            This is fully data-driven and requires no user parameters. (default: False)
         n_repeats : int, optional
             Number of Monte Carlo repeats for validation (default: 100)
-        n_bootstrap : int, optional
-            Number of bootstrap samples for 'bootstrap' and 'hybrid' methods (default: 50)
         mask_strategy : str, optional
             Masking strategy for Monte Carlo: 'random' or 'block' (default: 'block')
         frac : float, optional
@@ -1134,8 +915,6 @@ class Imputer:
             Block length for 'block' strategy (default: 5)
         n_blocks : int, optional
             Number of blocks for 'block' strategy (default: 1)
-        confidence : float, optional
-            Confidence level for intervals (default: 0.95)
         seed : int, optional
             Random seed for reproducibility
             
@@ -1151,76 +930,27 @@ class Imputer:
         >>> imputer = Imputer()
         >>> df_imputed = imputer.fit_transform(df)
         
-        >>> # With Monte Carlo uncertainty (constant band)
+        >>> # With Monte Carlo uncertainty
         >>> df_imputed, unc = imputer.fit_transform(
         ...     df, 
-        ...     return_uncertainty=True,
-        ...     uncertainty_method='monte_carlo'
+        ...     return_uncertainty=True
         ... )
         >>> print(f"RMSE: {unc['rmse']:.3f}")
         
-        >>> # With bootstrap uncertainty (point-wise)
-        >>> df_imputed, unc = imputer.fit_transform(
-        ...     df,
-        ...     return_uncertainty=True,
-        ...     uncertainty_method='bootstrap',
-        ...     n_bootstrap=50
-        ... )
-        >>> df_lower, df_upper = unc['lower'], unc['upper']
-        
-        >>> # With proximity-adjusted uncertainty (data-driven)
-        >>> df_imputed, unc = imputer.fit_transform(
-        ...     df,
-        ...     return_uncertainty=True,
-        ...     uncertainty_method='hybrid',
-        ...     adjust_by_proximity=True
-        ... )
-        >>> # Uncertainty now varies based on distance to observations
+
         """
         if not return_uncertainty:
             # Standard behavior - no uncertainty
             return self.fit(X).transform(X)
         
-        # Validate uncertainty method
-        valid_methods = ['monte_carlo', 'bootstrap', 'hybrid']
-        if uncertainty_method not in valid_methods:
-            raise ValueError(
-                f"uncertainty_method must be one of {valid_methods}, "
-                f"got '{uncertainty_method}'"
-            )
-        
         # Fit and transform
         self.fit(X)
         df_imputed = self.transform(X)
         
-        # Compute uncertainty based on method
-        if uncertainty_method == 'monte_carlo':
-            uncertainty_dict = self._uncertainty_monte_carlo(
-                X, n_repeats, mask_strategy, frac, block_len, n_blocks, seed
-            )
-        elif uncertainty_method == 'bootstrap':
-            uncertainty_dict = self._uncertainty_bootstrap(
-                X, df_imputed, n_bootstrap, confidence, seed
-            )
-        elif uncertainty_method == 'hybrid':
-            uncertainty_dict = self._uncertainty_hybrid(
-                X, df_imputed, n_repeats, n_bootstrap, mask_strategy,
-                frac, block_len, n_blocks, confidence, seed
-            )
-        
-        # Apply proximity-based adjustment if requested
-        if adjust_by_proximity:
-            if 'std' in uncertainty_dict:
-                # Adjust standard deviation
-                uncertainty_dict['std'] = self._apply_proximity_adjustment(
-                    X, uncertainty_dict['std']
-                )
-            if 'lower' in uncertainty_dict and 'upper' in uncertainty_dict:
-                # Adjust confidence intervals
-                ci_width = (uncertainty_dict['upper'] - uncertainty_dict['lower']) / 2
-                adjusted_width = self._apply_proximity_adjustment(X, ci_width)
-                uncertainty_dict['lower'] = df_imputed - adjusted_width
-                uncertainty_dict['upper'] = df_imputed + adjusted_width
+        # Compute uncertainty using Monte Carlo validation
+        uncertainty_dict = self._uncertainty_monte_carlo(
+            X, n_repeats, mask_strategy, frac, block_len, n_blocks, seed
+        )
         
         return df_imputed, uncertainty_dict
     
@@ -1260,173 +990,6 @@ class Imputer:
             'raw_imputed':results["raw_imputed"]
         }
     
-    def _uncertainty_bootstrap(
-        self,
-        X: pd.DataFrame,
-        df_imputed: pd.DataFrame,
-        n_bootstrap: int,
-        confidence: float,
-        seed: Optional[int]
-    ) -> Dict[str, Any]:
-        """
-        Compute point-wise uncertainty using bootstrap resampling.
-        
-        Returns
-        -------
-        dict
-            {'method': 'bootstrap', 'lower': DataFrame, 'upper': DataFrame,
-             'std': DataFrame}
-        """
-        if self.verbose:
-            print(f"Computing bootstrap uncertainty with {n_bootstrap} samples...")
-        
-        rng = np.random.default_rng(seed)
-        X_validated = validate_dataframe(X)
-        X_array = X_validated.values
-        
-        # Store bootstrap predictions for each missing value
-        missing_mask = np.isnan(X_array)
-        n_missing = missing_mask.sum()
-        
-        if n_missing == 0:
-            warnings.warn("No missing values to compute uncertainty for")
-            return {
-                'method': 'bootstrap',
-                'lower': df_imputed.copy(),
-                'upper': df_imputed.copy(),
-                'std': pd.DataFrame(0.0, index=df_imputed.index, columns=df_imputed.columns)
-            }
-        
-        # Collect bootstrap samples
-        bootstrap_predictions = []
-        
-        for i in range(n_bootstrap):
-            # Different random seed for each bootstrap
-            s = None if seed is None else seed + i
-            
-            # Create a modified version by bootstrapping observed values
-            X_boot = X_array.copy()
-            
-            # For each column, bootstrap the observed values
-            for col_idx in range(X_boot.shape[1]):
-                col_data = X_boot[:, col_idx]
-                observed_mask = ~np.isnan(col_data)
-                observed_values = col_data[observed_mask]
-                
-                if len(observed_values) > 0:
-                    # Bootstrap resample observed values
-                    rng_boot = np.random.default_rng(s + col_idx if s else None)
-                    resampled_values = rng_boot.choice(
-                        observed_values,
-                        size=len(observed_values),
-                        replace=True
-                    )
-                    X_boot[observed_mask, col_idx] = resampled_values
-            
-            # Perform imputation on bootstrapped data
-            X_imputed_boot = iterative_svd_impute(
-                X_boot,
-                rank=self.rank_,
-                max_iters=self.max_iters,
-                tol=self.tol
-            )
-            
-            bootstrap_predictions.append(X_imputed_boot)
-        
-        # Stack predictions
-        bootstrap_stack = np.stack(bootstrap_predictions, axis=0)
-        
-        # Compute statistics
-        alpha = 1 - confidence
-        lower_percentile = (alpha / 2) * 100
-        upper_percentile = (1 - alpha / 2) * 100
-        
-        mean_pred = np.mean(bootstrap_stack, axis=0)
-        std_pred = np.std(bootstrap_stack, axis=0)
-        lower_pred = np.percentile(bootstrap_stack, lower_percentile, axis=0)
-        upper_pred = np.percentile(bootstrap_stack, upper_percentile, axis=0)
-        
-        # Convert to DataFrames
-        df_lower = pd.DataFrame(lower_pred, index=X_validated.index, columns=X_validated.columns)
-        df_upper = pd.DataFrame(upper_pred, index=X_validated.index, columns=X_validated.columns)
-        df_std = pd.DataFrame(std_pred, index=X_validated.index, columns=X_validated.columns)
-        
-        if self.verbose:
-            avg_std = std_pred[missing_mask].mean()
-            print(f"Average uncertainty (std): {avg_std:.4f}")
-        
-        return {
-            'method': 'bootstrap',
-            'lower': df_lower,
-            'upper': df_upper,
-            'std': df_std,
-            'confidence': confidence
-        }
-    
-    def _uncertainty_hybrid(
-        self,
-        X: pd.DataFrame,
-        df_imputed: pd.DataFrame,
-        n_repeats: int,
-        n_bootstrap: int,
-        mask_strategy: str,
-        frac: float,
-        block_len: int,
-        n_blocks: int,
-        confidence: float,
-        seed: Optional[int]
-    ) -> Dict[str, Any]:
-        """
-        Compute uncertainty using hybrid approach (Monte Carlo + Bootstrap).
-        
-        Returns
-        -------
-        dict
-            Combination of both methods
-        """
-        if self.verbose:
-            print("Computing hybrid uncertainty...")
-        
-        # Get Monte Carlo results
-        mc_results = self._uncertainty_monte_carlo(
-            X, n_repeats, mask_strategy, frac, block_len, n_blocks, seed
-        )
-        
-        # Get bootstrap results
-        bootstrap_results = self._uncertainty_bootstrap(
-            X, df_imputed, n_bootstrap, confidence, seed
-        )
-        
-        # Combine: use bootstrap intervals scaled by MC validation
-        # Calculate scale factor using available data
-        X_validated = validate_dataframe(X)
-        missing_mask = np.isnan(X_validated.values)
-        
-        if missing_mask.any():
-            # Use std from bootstrap for missing values only
-            bootstrap_std_missing = bootstrap_results['std'].values[missing_mask]
-            avg_bootstrap_std = bootstrap_std_missing[~np.isnan(bootstrap_std_missing)].mean()
-            
-            if avg_bootstrap_std > 0:
-                scale_factor = mc_results['rmse'] / avg_bootstrap_std
-            else:
-                scale_factor = 1.0
-        else:
-            scale_factor = 1.0
-        
-        df_lower_scaled = df_imputed - bootstrap_results['std'] * scale_factor * 1.96
-        df_upper_scaled = df_imputed + bootstrap_results['std'] * scale_factor * 1.96
-        
-        return {
-            'method': 'hybrid',
-            'lower': df_lower_scaled,
-            'upper': df_upper_scaled,
-            'std': bootstrap_results['std'] * scale_factor,
-            'monte_carlo': mc_results,
-            'bootstrap': bootstrap_results,
-            'confidence': confidence
-        }
-    
     def get_confidence_intervals(
         self,
         df_imputed: pd.DataFrame,
@@ -1434,45 +997,53 @@ class Imputer:
         confidence: float = 0.95
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Extract confidence intervals from uncertainty dictionary.
+        Extract confidence intervals from Monte Carlo uncertainty estimates.
         
         Parameters
         ----------
         df_imputed : pd.DataFrame
             Imputed DataFrame
         uncertainty_dict : dict
-            Uncertainty dictionary from fit_transform
+            Uncertainty dictionary from fit_transform (Monte Carlo method)
         confidence : float, optional
-            Confidence level (only used for 'monte_carlo' method)
+            Confidence level (default: 0.95)
             
         Returns
         -------
         tuple of pd.DataFrame
-            (lower_bound, upper_bound) DataFrames
+            (lower_bound, upper_bound) DataFrames with constant uncertainty bands
             
         Examples
         --------
         >>> df_imputed, unc = imputer.fit_transform(df, return_uncertainty=True)
         >>> df_lower, df_upper = imputer.get_confidence_intervals(df_imputed, unc)
         """
-        method = uncertainty_dict['method']
+        # Validate method
+        if uncertainty_dict['method'] != 'monte_carlo':
+            raise ValueError(
+                f"get_confidence_intervals only supports 'monte_carlo' method, "
+                f"got '{uncertainty_dict['method']}'"
+            )
         
-        if method == 'monte_carlo':
-            # Constant band based on RMSE
-            rmse = uncertainty_dict['rmse']
-            z_score = 1.96 if confidence == 0.95 else 2.576  # Simplified
-            band = rmse * z_score
-            
-            df_lower = df_imputed - band
-            df_upper = df_imputed + band
-            
-        elif method in ['bootstrap', 'hybrid']:
-            # Use pre-computed intervals
-            df_lower = uncertainty_dict['lower']
-            df_upper = uncertainty_dict['upper']
-            
+        # Create constant band based on RMSE
+        rmse = uncertainty_dict['rmse']
+        
+        # Calculate z-score for confidence level
+        if confidence == 0.95:
+            z_score = 1.96
+        elif confidence == 0.99:
+            z_score = 2.576
+        elif confidence == 0.90:
+            z_score = 1.645
         else:
-            raise ValueError(f"Unknown method: {method}")
+            # Approximate for other confidence levels
+            from scipy.stats import norm
+            z_score = norm.ppf(1 - (1 - confidence) / 2)
+        
+        band = rmse * z_score
+        
+        df_lower = df_imputed - band
+        df_upper = df_imputed + band
         
         return df_lower, df_upper
     
