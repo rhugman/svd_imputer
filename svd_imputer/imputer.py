@@ -665,7 +665,6 @@ class Imputer:
         distances = []
         errors = []
         
-        X_array = df.values
         
         for _ in range(n_samples):
             # Randomly mask one observation per column
