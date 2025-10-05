@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 import warnings
 from typing import Optional, Union, Tuple, Dict, Any
-from sklearn.preprocessing import StandardScaler
 from math import sqrt
 from statistics import mean, stdev
 
@@ -40,11 +39,8 @@ def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95) -> int:
     >>> X = np.array([[1, 2, 3], [4, np.nan, 6], [7, 8, 9]])
     >>> rank = estimate_rank(X, variance_threshold=0.95)
     """
-    # Temporarily fill NaN with column means for rank estimation
-    X_temp = X.copy()
-    col_means = np.nanmean(X_temp, axis=0)
-    inds = np.where(np.isnan(X_temp))
-    X_temp[inds] = np.take(col_means, inds[1])
+    # Use consistent preprocessing approach
+    X_temp, _ = preprocess_for_svd(X)
     
     # Perform SVD
     try:
@@ -74,17 +70,17 @@ def iterative_svd_impute(
     X: np.ndarray,
     rank: int = 2,
     max_iters: int = 500,
-    tol: float = 1e-4,
-    scaler: Optional[StandardScaler] = None
+    tol: float = 1e-4
 ) -> np.ndarray:
     """
     Impute missing values using iterative SVD.
     
     This algorithm iteratively:
-    1. Fills missing values with column means (initialization)
+    1. Applies preprocessing (detrending, standardization)
     2. Computes SVD and low-rank approximation
     3. Updates missing values with approximation
     4. Repeats until convergence
+    5. Applies postprocessing to restore original scale
     
     Parameters
     ----------
@@ -96,8 +92,6 @@ def iterative_svd_impute(
         Maximum number of iterations (default: 500)
     tol : float, optional
         Convergence tolerance (default: 1e-4)
-    scaler : StandardScaler, optional
-        Optional scaler to normalize data before imputation
         
     Returns
     -------
@@ -126,25 +120,6 @@ def iterative_svd_impute(
     X_filled = X.copy()
     X_filled, preprocessing_info = preprocess_for_svd(X_filled)
     
-    
-#    # Apply scaling if provided
-#    if scaler is not None:
-#        # Note: StandardScaler.fit_transform doesn't handle NaN well
-#        # So we only scale after initial imputation
-#        pass
-#    
-#    # Step 1: Initialize missing values with column means
-#    col_means = np.nanmean(X_filled, axis=0)
-#    #col_random = np.random.normal(col_means, col_means.shape)  # Random noise
-#    inds = np.where(np.isnan(X_filled))
-#    X_filled[inds] = np.take(col_means, inds[1]) 
-#
-#    X_filled = X_filled - col_means
-#    
-#    # Apply scaling after initial imputation if scaler provided
-#    if scaler is not None:
-#        X_filled = scaler.fit_transform(X_filled)
-    
     # Step 2: Iterative updates
     converged = False
     for it in range(max_iters):
@@ -164,8 +139,7 @@ def iterative_svd_impute(
         
         # Update only the originally missing entries
         X_new = X_filled.copy()
-        X_new[inds] = X_approx[inds] 
-        #X_new = X_new + col_means
+        X_new[inds] = X_approx[inds]
         
         # Check convergence
         diff = np.linalg.norm(X_new - X_filled) / np.linalg.norm(X_filled)
@@ -183,12 +157,6 @@ def iterative_svd_impute(
             RuntimeWarning
         )
     
-#    # Inverse transform if scaler was used
-#   if scaler is not None:
-#       X_filled = scaler.inverse_transform(X_filled)
-#   
-#   X_filled = X_filled + col_means
-
     X_filled = postprocess_after_svd(X_filled, preprocessing_info)
     
     return X_filled
@@ -271,7 +239,6 @@ def _block_mask_time(X: np.ndarray, block_len: int = 5, n_blocks: int = 1,
 def _monte_carlo_validation(
     X: np.ndarray,
     rank: int,
-    scaler: Optional[StandardScaler],
     max_iters: int,
     tol: float,
     n_repeats: int = 100,
@@ -290,8 +257,6 @@ def _monte_carlo_validation(
         Input array with np.nan for missing values
     rank : int
         Rank for SVD imputation
-    scaler : StandardScaler, optional
-        Optional scaler
     max_iters : int
         Maximum iterations for imputation
     tol : float
@@ -341,8 +306,7 @@ def _monte_carlo_validation(
             X_with_nans,
             rank=rank,
             max_iters=max_iters,
-            tol=tol,
-            scaler=scaler
+            tol=tol
         )
         imputed_list.append(X_imputed)
 
@@ -392,8 +356,6 @@ class Imputer:
         Maximum number of SVD iterations (default: 500)
     tol : float, optional
         Convergence tolerance (default: 1e-4)
-    scaler : StandardScaler or None, optional
-        Optional scaler to normalize data before imputation (default: None)
     verbose : bool, optional
         Whether to print progress information (default: True)
         
@@ -448,7 +410,6 @@ class Imputer:
         rank: Union[int, str, None] = None,
         max_iters: int = 500,
         tol: float = 1e-4,
-        scaler: Optional[StandardScaler] = None,
         verbose: bool = True
     ):
         # Validate parameters
@@ -474,7 +435,6 @@ class Imputer:
         self.rank = rank
         self.max_iters = max_iters
         self.tol = tol
-        self.scaler = scaler
         self.verbose = verbose
         
         # Attributes set during fitting
@@ -664,7 +624,6 @@ class Imputer:
                 fold_results = _monte_carlo_validation(
                     X_array,
                     rank=rank,
-                    scaler=self.scaler,
                     max_iters=self.max_iters,
                     tol=self.tol,
                     n_repeats=n_repeats_per_fold,
@@ -852,7 +811,6 @@ class Imputer:
         results = _monte_carlo_validation(
             X_array,
             rank=self.rank_,
-            scaler=self.scaler,
             max_iters=self.max_iters,
             tol=self.tol,
             n_repeats=n_repeats,
@@ -908,8 +866,7 @@ class Imputer:
             X_array,
             rank=self.rank_,
             max_iters=self.max_iters,
-            tol=self.tol,
-            scaler=self.scaler
+            tol=self.tol
         )
         
         # Convert back to DataFrame
@@ -979,8 +936,7 @@ class Imputer:
                     X_masked,
                     rank=self.rank_,
                     max_iters=self.max_iters,
-                    tol=self.tol,
-                    scaler=self.scaler
+                    tol=self.tol
                 )
                 imputed_df = pd.DataFrame(
                     X_imputed, 
@@ -1372,8 +1328,7 @@ class Imputer:
                 X_boot,
                 rank=self.rank_,
                 max_iters=self.max_iters,
-                tol=self.tol,
-                scaler=self.scaler
+                tol=self.tol
             )
             
             bootstrap_predictions.append(X_imputed_boot)
@@ -1823,7 +1778,6 @@ class Imputer:
             'rank': self.rank,
             'max_iters': self.max_iters,
             'tol': self.tol,
-            'scaler': self.scaler,
             'verbose': self.verbose
         }
     
