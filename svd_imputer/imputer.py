@@ -370,9 +370,11 @@ class Imputer:
     variance_threshold : float, optional
         Fraction of variance to preserve for automatic rank estimation.
         Default is 0.95 (95% of variance). Must be between 0 and 1.
-    rank : int, optional
-        Fixed rank to use. If None (default), rank is estimated automatically
-        based on variance_threshold.
+    rank : int, str, or None, optional
+        Fixed rank to use. Options:
+        - int: Use fixed rank value
+        - "auto": Optimize rank via cross-validation to minimize imputation error
+        - None (default): Estimate rank based on variance_threshold
     max_iters : int, optional
         Maximum number of SVD iterations (default: 500)
     tol : float, optional
@@ -392,6 +394,8 @@ class Imputer:
         Column names from the fitted DataFrame
     index_name_ : str
         Name of the index from the fitted DataFrame
+    optimization_results_ : dict, optional
+        Results from rank optimization (only set when rank="auto")
         
     Examples
     --------
@@ -413,12 +417,22 @@ class Imputer:
     >>> # Fixed rank
     >>> imputer = Imputer(rank=2)
     >>> df_imputed = imputer.fit_transform(df)
+    >>> 
+    >>> # Auto-optimize rank via cross-validation
+    >>> imputer = Imputer(rank="auto")
+    >>> df_imputed = imputer.fit_transform(df)
+    >>> print(f"Optimized rank: {imputer.rank_}")
+    >>> 
+    >>> # Auto-optimize rank via cross-validation
+    >>> imputer = Imputer(rank="auto")
+    >>> df_imputed = imputer.fit_transform(df)
+    >>> print(f"Optimized rank: {imputer.rank_}")
     """
     
     def __init__(
         self,
         variance_threshold: float = 0.95,
-        rank: Optional[int] = None,
+        rank: Union[int, str, None] = None,
         max_iters: int = 500,
         tol: float = 1e-4,
         scaler: Optional[StandardScaler] = None,
@@ -430,8 +444,12 @@ class Imputer:
                 f"variance_threshold must be between 0 and 1, got {variance_threshold}"
             )
         
-        if rank is not None and rank < 1:
-            raise ValueError(f"rank must be at least 1, got {rank}")
+        if rank is not None:
+            if isinstance(rank, str):
+                if rank != "auto":
+                    raise ValueError(f"Only 'auto' is supported as string for rank, got '{rank}'")
+            elif not isinstance(rank, int) or rank < 1:
+                raise ValueError(f"rank must be a positive integer or 'auto', got {rank}")
         
         if max_iters < 1:
             raise ValueError(f"max_iters must be at least 1, got {max_iters}")
@@ -451,10 +469,16 @@ class Imputer:
         self.is_fitted_ = False
         self.columns_ = None
         self.index_name_ = None
+        self.optimization_results_ = None
     
     def fit(self, X: pd.DataFrame) -> 'Imputer':
         """
-        Fit the imputer on the data (estimate rank if needed).
+        Fit the imputer on the data (estimate or optimize rank if needed).
+        
+        The rank determination strategy depends on the `rank` parameter:
+        - If rank="auto": Optimize rank via cross-validation to minimize error
+        - If rank=None: Estimate rank based on variance_threshold (default)
+        - If rank=int: Use the specified fixed rank
         
         Parameters
         ----------
@@ -465,6 +489,11 @@ class Imputer:
         -------
         self
             Fitted imputer
+            
+        Notes
+        -----
+        When rank="auto", the optimization results are stored in the
+        `optimization_results_` attribute for inspection.
         """
         # Validate input data
         X_validated = validate_dataframe(X)
@@ -476,13 +505,31 @@ class Imputer:
         # Convert to numpy array
         X_array = X_validated.values
         
-        # Estimate rank if not provided
-        if self.rank is None:
+        # Determine rank based on user specification
+        if self.rank == "auto":
+            # Auto-optimize rank via cross-validation
+            if self.verbose:
+                print("Auto-optimizing rank via cross-validation...")
+            
+            self.optimization_results_ = self.optimize_rank(X_validated)
+            self.rank_ = self.optimization_results_['optimal_rank']
+            
+            if self.verbose:
+                score = self.optimization_results_['optimal_score']
+                converged = self.optimization_results_['convergence_info']['is_converged']
+                print(f"Optimized rank: {self.rank_} (CV score: {score:.4f})")
+                if not converged:
+                    print("Warning: Optimization may not have converged to a clear minimum")
+        
+        elif self.rank is None:
+            # Variance-based estimation (default behavior)
             self.rank_ = estimate_rank(X_array, self.variance_threshold)
             if self.verbose:
                 print(f"Estimated rank: {self.rank_} "
                       f"(variance threshold: {self.variance_threshold*100:.0f}%)")
+        
         else:
+            # Fixed rank specified by user
             self.rank_ = self.rank
             # Check if requested rank is feasible
             check_sufficient_rank(X_validated, self.rank_)
@@ -491,6 +538,236 @@ class Imputer:
         
         self.is_fitted_ = True
         return self
+    
+    def optimize_rank(
+        self,
+        X: pd.DataFrame,
+        rank_range: Optional[Tuple[int, int]] = None,
+        cv_folds: int = 5,
+        n_repeats_per_fold: int = 20,
+        mask_strategy: str = 'random',
+        frac: float = 0.1,
+        block_len: int = 5,
+        n_blocks: int = 1,
+        metric: str = 'rmse',
+        seed: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Optimize rank via cross-validation to minimize imputation error.
+        
+        This method systematically tests different rank values using cross-validation
+        with multiple random masking experiments to find the rank that minimizes
+        prediction error on held-out data.
+        
+        Parameters
+        ----------
+        X : pd.DataFrame
+            Input DataFrame with datetime index
+        rank_range : tuple of int, optional
+            (min_rank, max_rank) to test. If None, uses [1, min(n_rows, n_cols, 10)]
+        cv_folds : int, optional
+            Number of cross-validation folds (default: 5)
+        n_repeats_per_fold : int, optional
+            Number of random masking experiments per fold (default: 20)
+        mask_strategy : str, optional
+            'random' or 'block' masking strategy (default: 'random')
+        frac : float, optional
+            Fraction of values to mask for 'random' strategy (default: 0.1)
+        block_len : int, optional
+            Block length for 'block' strategy (default: 5)
+        n_blocks : int, optional
+            Number of blocks for 'block' strategy (default: 1)
+        metric : str, optional
+            Optimization metric: 'rmse' or 'mae' (default: 'rmse')
+        seed : int, optional
+            Random seed for reproducibility
+            
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - 'optimal_rank': Best rank found
+            - 'optimal_score': Cross-validation score for optimal rank
+            - 'results_df': DataFrame with detailed results for all ranks
+            - 'cv_details': Fold-by-fold results
+            - 'convergence_info': Optimization diagnostics
+            
+        Examples
+        --------
+        >>> imputer = Imputer()
+        >>> results = imputer.optimize_rank(df, rank_range=(1, 8))
+        >>> print(f"Optimal rank: {results['optimal_rank']}")
+        >>> print(results['results_df'])
+        """
+        # Validate input data
+        X_validated = validate_dataframe(X)
+        X_array = X_validated.values
+        n_rows, n_cols = X_array.shape
+        
+        # Determine rank range
+        if rank_range is None:
+            max_possible = min(n_rows, n_cols)
+            max_test = min(max_possible, 10)  # Reasonable upper bound
+            rank_range = (1, max_test)
+        
+        min_rank, max_rank = rank_range
+        if min_rank < 1:
+            raise ValueError(f"min_rank must be at least 1, got {min_rank}")
+        if max_rank > min(n_rows, n_cols):
+            raise ValueError(
+                f"max_rank={max_rank} exceeds maximum possible rank {min(n_rows, n_cols)} "
+                f"for matrix with shape {X_array.shape}"
+            )
+        
+        if metric not in ['rmse', 'mae']:
+            raise ValueError(f"metric must be 'rmse' or 'mae', got '{metric}'")
+        
+        if self.verbose:
+            print(f"Optimizing rank in range [{min_rank}, {max_rank}] using {cv_folds}-fold CV")
+            print(f"Strategy: {mask_strategy}, Repeats per fold: {n_repeats_per_fold}")
+        
+        # Initialize random number generator
+        rng = np.random.default_rng(seed)
+        
+        # Storage for results
+        rank_results = []
+        cv_details = {}
+        
+        # Test each rank
+        ranks_to_test = list(range(min_rank, max_rank + 1))
+        
+        for rank in ranks_to_test:
+            if self.verbose:
+                print(f"Testing rank {rank}...")
+            
+            fold_scores = []
+            cv_details[rank] = []
+            
+            # Cross-validation folds
+            for fold in range(cv_folds):
+                fold_seed = None if seed is None else int(rng.integers(1 << 30))
+                
+                # Perform validation for this fold and rank
+                fold_results = _monte_carlo_validation(
+                    X_array,
+                    rank=rank,
+                    scaler=self.scaler,
+                    max_iters=self.max_iters,
+                    tol=self.tol,
+                    n_repeats=n_repeats_per_fold,
+                    mask_strategy=mask_strategy,
+                    frac=frac,
+                    block_len=block_len,
+                    n_blocks=n_blocks,
+                    seed=fold_seed
+                )
+                
+                # Extract the metric of interest
+                if metric == 'rmse':
+                    fold_score = fold_results['RMSE']['mean']
+                else:  # mae
+                    fold_score = fold_results['MAE']['mean']
+                
+                fold_scores.append(fold_score)
+                cv_details[rank].append({
+                    'fold': fold,
+                    'score': fold_score,
+                    'full_results': fold_results
+                })
+            
+            # Summarize across folds
+            mean_score = np.mean(fold_scores)
+            std_score = np.std(fold_scores)
+            
+            rank_results.append({
+                'rank': rank,
+                f'mean_{metric}': mean_score,
+                f'std_{metric}': std_score,
+                'fold_scores': fold_scores
+            })
+            
+            if self.verbose:
+                print(f"  Rank {rank}: {metric.upper()}={mean_score:.4f} ± {std_score:.4f}")
+        
+        # Convert to DataFrame for easy analysis
+        results_df = pd.DataFrame(rank_results)
+        
+        # Find optimal rank (minimum error)
+        optimal_idx = results_df[f'mean_{metric}'].idxmin()
+        optimal_rank = results_df.loc[optimal_idx, 'rank']
+        optimal_score = results_df.loc[optimal_idx, f'mean_{metric}']
+        
+        # Check convergence (is there a clear minimum?)
+        scores = results_df[f'mean_{metric}'].values
+        stds = results_df[f'std_{metric}'].values
+        
+        # Simple convergence check: optimal score should be significantly better than others
+        other_scores = scores[scores != optimal_score]
+        if len(other_scores) > 0:
+            min_other = other_scores.min()
+            improvement = min_other - optimal_score
+            significance = improvement / stds[optimal_idx] if stds[optimal_idx] > 0 else float('inf')
+        else:
+            significance = float('inf')
+        
+        convergence_info = {
+            'improvement_over_second_best': improvement if len(other_scores) > 0 else 0,
+            'significance_ratio': significance,
+            'is_converged': significance > 1.0,  # At least 1 std dev improvement
+            'tested_ranks': ranks_to_test,
+            'total_experiments': len(ranks_to_test) * cv_folds * n_repeats_per_fold
+        }
+        
+        if self.verbose:
+            print(f"\nOptimization complete:")
+            print(f"  Optimal rank: {optimal_rank}")
+            print(f"  {metric.upper()}: {optimal_score:.4f}")
+            print(f"  Convergence: {'Yes' if convergence_info['is_converged'] else 'No'}")
+            if not convergence_info['is_converged']:
+                print(f"  Consider expanding rank range or increasing n_repeats_per_fold")
+        
+        return {
+            'optimal_rank': int(optimal_rank),
+            'optimal_score': float(optimal_score),
+            'results_df': results_df,
+            'cv_details': cv_details,
+            'convergence_info': convergence_info,
+            'parameters': {
+                'rank_range': rank_range,
+                'cv_folds': cv_folds,
+                'n_repeats_per_fold': n_repeats_per_fold,
+                'mask_strategy': mask_strategy,
+                'metric': metric,
+                'seed': seed
+            }
+        }
+    
+    def get_optimization_results(self) -> Optional[Dict[str, Any]]:
+        """
+        Get rank optimization results (only available when rank="auto" was used).
+        
+        Returns
+        -------
+        dict or None
+            Optimization results dictionary containing:
+            - 'optimal_rank': Best rank found
+            - 'optimal_score': Cross-validation score
+            - 'results_df': DataFrame with all tested ranks
+            - 'cv_details': Detailed fold-by-fold results
+            - 'convergence_info': Optimization diagnostics
+            - 'parameters': Optimization parameters used
+            
+        Examples
+        --------
+        >>> imputer = Imputer(rank="auto")
+        >>> imputer.fit(df)
+        >>> results = imputer.get_optimization_results()
+        >>> print(results['results_df'])
+        >>> print(f"Tested {len(results['cv_details'])} ranks")
+        """
+        if not hasattr(self, 'optimization_results_') or self.optimization_results_ is None:
+            return None
+        return self.optimization_results_
     
     def estimate_uncertainty(
         self,
