@@ -11,7 +11,6 @@ import pandas as pd
 import warnings
 from typing import Optional, Union, Tuple, Dict, Any
 from math import sqrt
-from statistics import mean
 
 from .preprocessing import validate_dataframe, check_sufficient_rank, preprocess_for_svd, postprocess_after_svd
 
