@@ -103,14 +103,14 @@ class TestUncertaintyEstimation:
     def test_uncertainty_consistency(self):
         """Test that uncertainty estimation is reasonably consistent."""
         # Create sample data with known structure
-        np.random.seed(42)  # For reproducibility
+        rng = np.random.default_rng(42)  # For reproducibility
         dates = pd.date_range("2020-01-01", periods=100, freq="D")
         t = np.arange(100)
 
         df = pd.DataFrame(
             {
-                "A": np.sin(2 * np.pi * t / 20) + 0.1 * np.random.randn(100),
-                "B": np.cos(2 * np.pi * t / 15) + 0.1 * np.random.randn(100),
+                "A": np.sin(2 * np.pi * t / 20) + 0.1 * rng.standard_normal(100),
+                "B": np.cos(2 * np.pi * t / 15) + 0.1 * rng.standard_normal(100),
             },
             index=dates,
         )

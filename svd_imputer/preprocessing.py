@@ -136,7 +136,37 @@ def check_sufficient_rank(df: pd.DataFrame, min_rank: int = 1) -> None:
 
 
 def detrend_timeseries(X):
-    """Detrend each column (time series)"""
+    """
+    Remove linear trends from each column (time series) in a 2D array.
+
+    For each column, fits a linear trend (using least squares) to the observed (non-NaN)
+    values and subtracts this trend from the entire column. The function returns both
+    the detrended data and the estimated trends.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        2D array of shape (n_samples, n_series), where each column is a time series.
+        May contain NaN values, which are ignored when fitting the trend.
+
+    Returns
+    -------
+    X_detrended : np.ndarray
+        Array of the same shape as `X`, with the linear trend removed from each column.
+    trends : np.ndarray
+        Array of the same shape as `X`, containing the estimated linear trend for each column.
+
+    Notes
+    -----
+    - Columns with fewer than 2 non-NaN values are left unchanged (trend is zero).
+    - NaN values in `X` are preserved in the output.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> X = np.array([[1, 2], [2, 4], [3, 6], [np.nan, 8]])
+    >>> X_detrended, trends = detrend_timeseries(X)
+    """
     X_detrended = np.copy(X)
     trends = np.zeros_like(X)
 
@@ -156,7 +186,30 @@ def detrend_timeseries(X):
 
 
 def standardize_columns(X):
-    """Standardize each column to mean=0, std=1"""
+    """
+    Standardize each column of the input array to mean 0 and standard deviation 1.
+
+    This function computes the mean and standard deviation of each column (ignoring NaNs),
+    and returns the standardized array along with the means and standard deviations used.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Input 2D array (matrix) with shape (n_samples, n_features). Can contain NaN values.
+
+    Returns
+    -------
+    X_standardized : np.ndarray
+        Array of the same shape as X, with each column standardized (mean=0, std=1).
+    means : np.ndarray
+        1D array of means for each column (shape: n_features,).
+    stds : np.ndarray
+        1D array of standard deviations for each column (shape: n_features,).
+
+    Notes
+    -----
+    NaN values are ignored when computing means and standard deviations, and remain in the output.
+    """
     means = np.nanmean(X, axis=0)
     stds = np.nanstd(X, axis=0)
     X_standardized = (X - means) / stds
