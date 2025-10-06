@@ -225,10 +225,9 @@ def iterative_svd_impute(
     
     # Warn if didn't converge
     if not converged:
-        warnings.warn(
+        logging.warning(
             f"Max iterations ({max_iters}) reached without convergence "
-            f"(diff={diff:.2e}). Consider increasing max_iters or relaxing tol.",
-            RuntimeWarning
+            f"(diff={diff:.2e}). Consider increasing max_iters or relaxing tol."
         )
     
     X_filled = postprocess_after_svd(X_filled, preprocessing_info)
@@ -323,6 +322,9 @@ def _random_mask_observed(X: np.ndarray, frac: float = 0.1, seed: Optional[int] 
             
         # Get column indices of observed values in this row
         observed_cols = np.where(row_observed)[0]
+
+        # set n_to_mask_in_row to random number between 1 and n_to_mask_in_row
+        n_to_mask_in_row = rng.integers(1, n_to_mask_in_row + 1)
         
         # Randomly select columns to mask
         cols_to_mask = rng.choice(observed_cols, size=n_to_mask_in_row, replace=False)
