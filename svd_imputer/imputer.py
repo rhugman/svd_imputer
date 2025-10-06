@@ -322,7 +322,7 @@ def _random_mask_observed(X: np.ndarray, frac: float = 0.1, seed: Optional[int] 
         # Get column indices of observed values in this row
         observed_cols = np.where(row_observed)[0]
 
-        # set n_to_mask_in_row to random number between 1 and n_to_mask_in_row
+        # Set n_to_mask_in_row to a random number between 1 and n_to_mask_in_row
         n_to_mask_in_row = rng.integers(1, n_to_mask_in_row + 1)
         
         # Randomly select columns to mask
