@@ -205,7 +205,30 @@ def detrend_timeseries(X):
     return X_detrended, trends
 
 def standardize_columns(X):
-    """Standardize each column to mean=0, std=1"""
+    """
+    Standardize each column of the input array to mean 0 and standard deviation 1.
+
+    This function computes the mean and standard deviation of each column (ignoring NaNs),
+    and returns the standardized array along with the means and standard deviations used.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Input 2D array (matrix) with shape (n_samples, n_features). Can contain NaN values.
+
+    Returns
+    -------
+    X_standardized : np.ndarray
+        Array of the same shape as X, with each column standardized (mean=0, std=1).
+    means : np.ndarray
+        1D array of means for each column (shape: n_features,).
+    stds : np.ndarray
+        1D array of standard deviations for each column (shape: n_features,).
+
+    Notes
+    -----
+    NaN values are ignored when computing means and standard deviations, and remain in the output.
+    """
     means = np.nanmean(X, axis=0)
     stds = np.nanstd(X, axis=0)
     X_standardized = (X - means) / stds
