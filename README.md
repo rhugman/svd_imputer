@@ -1,6 +1,6 @@
 # SVD Time Series Imputer
 
-A comprehensive and efficient Python package for time series imputation using Singular Value Decomposition (SVD) with advanced features for uncertainty quantification and model diagnostics.
+A simple and efficient Python package for time series imputation using Singular Value Decomposition (SVD) wand imputation error/uncertainty quantification.
 
 ## Table of Contents
 - [Features](#features)
@@ -22,8 +22,8 @@ A comprehensive and efficient Python package for time series imputation using Si
   - Cross-validation optimization (`rank="auto"`)
   - Fixed rank specification
 - **Robust SVD imputation** with iterative convergence and automatic fallbacks
-- **Comprehensive uncertainty estimation** using Monte Carlo validation
-- **Data preprocessing** with detrending and standardization
+- **Uncertainty estimation** using Monte Carlo validation
+- **Internal Data preprocessing** i.e., standardization
 - **Scikit-learn compatible API** with `fit()`, `transform()`, and `fit_transform()` methods
 
 ### Advanced Features  
@@ -31,10 +31,9 @@ A comprehensive and efficient Python package for time series imputation using Si
   - Reconstruction residual analysis
   - Rank optimization with cross-validation
   - SVD component analysis and projection
-- **Robust masking strategies** for Monte Carlo validation:
+- **Custom masking strategies** for Monte Carlo validation:
   - Random masking with row integrity preservation
   - Block temporal masking with automatic fallbacks
-- **Professional logging** with configurable log levels
 - **Minimal dependencies** (numpy, pandas, scikit-learn)
 
 ## Installation
@@ -162,21 +161,6 @@ imputer = Imputer(
 )
 ```
 
-### Logging Configuration
-
-The package uses Python's standard `logging` module with configurable levels:
-
-```python
-import logging
-
-# Set logging level (DEBUG, INFO, WARNING, ERROR)  
-logging.getLogger('svd_imputer.imputer').setLevel(logging.DEBUG)
-
-# Disable logging
-logging.getLogger('svd_imputer.imputer').setLevel(logging.CRITICAL)
-```
-
-See [LOGGING_GUIDE.md](LOGGING_GUIDE.md) for detailed logging documentation.
 
 ## Requirements
 
@@ -188,10 +172,7 @@ See [LOGGING_GUIDE.md](LOGGING_GUIDE.md) for detailed logging documentation.
 ## Examples
 
 Complete examples are available in the `examples/` directory:
-- `basic_usage.py` - Core functionality demonstration
-- `advanced_usage.py` - Advanced features and uncertainty quantification
-- `quick_start.py` - Minimal working examples
-- `basic_example.ipynb` - Interactive Jupyter notebook
+- `basic_example.ipynb` - Simple Jupyter notebook
 
 ## How It Works
 
@@ -214,17 +195,14 @@ Complete examples are available in the `examples/` directory:
 4. **Uncertainty Quantification**:
    - **Monte Carlo validation**: Masks observed values and measures reconstruction error
    - **Multiple masking strategies**: Random or temporal block masking
-   - **Robust error estimation**: RMSE/MAE with statistical summaries
 
 5. **Post-processing**:
    - Restores original scale and temporal trends
-   - Comprehensive model diagnostics
 
 ### Key Features
-- **Robust masking**: Prevents creation of entirely missing rows during validation
+- **Custom masking**: Prevents creation of entirely missing rows during validation
 - **Automatic fallbacks**: Switches strategies when block masking fails
 - **SVD component caching**: Enables efficient reuse for multiple datasets
-- **Comprehensive logging**: Detailed progress tracking and debugging information
 
 ## API Reference
 
