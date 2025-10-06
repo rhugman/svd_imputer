@@ -7,11 +7,11 @@ Singular Value Decomposition (SVD) with automatic rank estimation.
 
 Main Components:
 - Imputer: Main class for time series imputation
-- preprocessing: Data validation utilities
+- validate_dataframe: Data validation utilities
 """
 
 from .imputer import Imputer
-from .preprocessing import prepare_data
+from .preprocessing import validate_dataframe
 
 # Version information
 try:
@@ -25,4 +25,4 @@ except ImportError:
     except (ImportError, LookupError):
         __version__ = "unknown"
 
-__all__ = ["Imputer", "prepare_data", "__version__"]
+__all__ = ["Imputer", "validate_dataframe", "__version__"]
