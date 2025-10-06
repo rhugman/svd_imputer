@@ -224,7 +224,7 @@ def iterative_svd_impute(
     
     # Warn if didn't converge
     if not converged:
-        logging.warning(
+        logger.warning(
             f"Max iterations ({max_iters}) reached without convergence "
             f"(diff={diff:.2e}). Consider increasing max_iters or relaxing tol."
         )
