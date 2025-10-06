@@ -26,5 +26,3 @@ except ImportError:
 
 __all__ = ["Imputer", "prepare_data", "__version__"]
 
-__version__ = "0.1.0"
-__all__ = ["Imputer"]
