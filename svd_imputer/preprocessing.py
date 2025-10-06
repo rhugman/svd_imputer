@@ -188,28 +188,24 @@ def preprocess_for_svd(data):
         X = data.copy().values.astype(float)
     elif isinstance(data, np.ndarray):
         X = data.copy().astype(float)
-    # 1. Detrend (if non-stationary)
-    X_detrended, trends = detrend_timeseries(X)
-    
+
     # 2. Standardize (always good)
     X_std, means, stds = standardize_columns(X)
     
-    # 3. Fill with mean (now mean=0 after standardization)
-    X_filled = np.where(np.isnan(X_std), 0, X_std)
+    # 3. PRESERVE missing values - don't fill them yet!
+    # The iterative SVD algorithm will handle the missing values
     if isinstance(data, pd.DataFrame):
-        X_filled = pd.DataFrame(X_filled,columns=data.columns,index=data.index)
+        X_std = pd.DataFrame(X_std, columns=data.columns, index=data.index)
     
-    return X_filled, (trends, means, stds)
+    return X_std, (means, stds)
 
 def postprocess_after_svd(X_imputed, preprocessing_info):
     """Reverse preprocessing"""
-    trends, means, stds = preprocessing_info
+    means, stds = preprocessing_info
     
     # 1. Unstandardize
     X = X_imputed * stds + means
     
-    # 2. Add trends back
-    #X = X + trends
     
     return X
 

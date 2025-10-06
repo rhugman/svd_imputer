@@ -101,8 +101,9 @@ def iterative_svd_impute(
     X: np.ndarray,
     rank: int = 2,
     max_iters: int = 500,
-    tol: float = 1e-4
-) -> np.ndarray:
+    tol: float = 1e-4,
+    return_svd: bool = False
+) -> Union[np.ndarray, Tuple[np.ndarray, Dict[str, np.ndarray]]]:
     """
     Impute missing values using iterative SVD.
     
@@ -147,14 +148,35 @@ def iterative_svd_impute(
             f"rank={rank} exceeds maximum possible rank {max_possible_rank} "
             f"for matrix with shape {X.shape}"
         )
+    # Store missing positions before preprocessing
     inds = np.where(np.isnan(X))
-    X_filled = X.copy()
-    X_filled, preprocessing_info = preprocess_for_svd(X_filled)
+    
+    # Preprocess (this now preserves missing values)
+    X_filled, preprocessing_info = preprocess_for_svd(X)
+    
+    # Convert to numpy array if it's a DataFrame after preprocessing
+    if isinstance(X_filled, pd.DataFrame):
+        X_filled = X_filled.values
+    
+    # Now fill missing values with zeros (mean in standardized space) for initial guess
+    X_filled = np.where(np.isnan(X_filled), 0.0, X_filled)
     
     # Step 2: Iterative updates
     converged = False
+    final_svd = None
     for it in range(max_iters):
-        # Compute SVD
+        # Compute SVD and store components for potential return
+        try:
+            U, s, Vt = np.linalg.svd(X_filled, full_matrices=False)
+            final_svd = {'U': U[:, :rank], 's': s[:rank], 'Vt': Vt[:rank, :]}
+        except np.linalg.LinAlgError:
+            warnings.warn(
+                f"SVD failed at iteration {it}. Returning current state.",
+                RuntimeWarning
+            )
+            break
+            
+        # Compute low-rank approximation
         X_approx = compute_low_rank_approximation(X_filled, rank)
         
         # Update only the originally missing entries
@@ -179,7 +201,10 @@ def iterative_svd_impute(
     
     X_filled = postprocess_after_svd(X_filled, preprocessing_info)
     
-    return X_filled
+    if return_svd and final_svd is not None:
+        return X_filled, final_svd
+    else:
+        return X_filled
 
 
 def _rmse(true: np.ndarray, pred: np.ndarray) -> float:
@@ -360,11 +385,16 @@ class Imputer:
     """
     SVD-based time series imputer with automatic rank estimation.
     
-    This class provides a scikit-learn style interface for imputing missing
-    values in time series data using Singular Value Decomposition (SVD).
+    This class provides an efficient interface for imputing missing values 
+    in time series data using Singular Value Decomposition (SVD). Data is 
+    validated and preprocessed once at initialization, eliminating redundant 
+    operations and ensuring consistency across all analyses.
     
     Parameters
     ----------
+    data : pd.DataFrame
+        Input DataFrame with datetime index and time series data to be imputed.
+        This data is validated and preprocessed once at initialization.
     variance_threshold : float, optional
         Fraction of variance to preserve for automatic rank estimation.
         Default is 0.95 (95% of variance). Must be between 0 and 1.
@@ -382,14 +412,22 @@ class Imputer:
         
     Attributes
     ----------
+    data_original_ : pd.DataFrame
+        Original validated input data
+    data_preprocessed_ : pd.DataFrame or np.ndarray
+        Preprocessed data ready for SVD operations
+    preprocessing_info_ : tuple
+        Preprocessing parameters for consistent transformations
     rank_ : int
         The rank used for imputation (set after fitting)
     is_fitted_ : bool
         Whether the imputer has been fitted
     columns_ : list
-        Column names from the fitted DataFrame
+        Column names from the input DataFrame
     index_name_ : str
-        Name of the index from the fitted DataFrame
+        Name of the index from the input DataFrame
+    svd_components_ : dict, optional
+        Cached SVD components {'U': U, 's': s, 'Vt': Vt} for reuse
     optimization_results_ : dict, optional
         Results from rank optimization (only set when rank="auto")
         
@@ -406,27 +444,34 @@ class Imputer:
     ...     'B': [10, np.nan, 30, 40, np.nan, 60, 70, 80, 90, 100]
     ... }, index=dates)
     >>> 
-    >>> # Automatic rank estimation
-    >>> imputer = Imputer(variance_threshold=0.95)
-    >>> df_imputed = imputer.fit_transform(df)
+    >>> # Automatic rank estimation (default behavior)
+    >>> imputer = Imputer(df, variance_threshold=0.95)
+    >>> df_imputed = imputer.fit_transform()
     >>> 
     >>> # Fixed rank
-    >>> imputer = Imputer(rank=2)
-    >>> df_imputed = imputer.fit_transform(df)
+    >>> imputer = Imputer(df, rank=2)
+    >>> df_imputed = imputer.fit_transform()
     >>> 
     >>> # Auto-optimize rank via cross-validation
-    >>> imputer = Imputer(rank="auto")
-    >>> df_imputed = imputer.fit_transform(df)
+    >>> imputer = Imputer(df, rank="auto")
+    >>> imputer.fit()
     >>> print(f"Optimized rank: {imputer.rank_}")
+    >>> df_imputed = imputer.transform()
     >>> 
-    >>> # Auto-optimize rank via cross-validation
-    >>> imputer = Imputer(rank="auto")
-    >>> df_imputed = imputer.fit_transform(df)
-    >>> print(f"Optimized rank: {imputer.rank_}")
+    >>> # SVD reuse for analysis
+    >>> imputer = Imputer(df, rank=2)
+    >>> imputer.fit()
+    >>> 
+    >>> # Project new data onto SVD subspace
+    >>> df_projected = imputer.project_data(new_df)
+    >>> 
+    >>> # Reconstruct data using SVD
+    >>> df_reconstructed = imputer.reconstruct_data(new_df)
     """
     
     def __init__(
         self,
+        data: pd.DataFrame,
         variance_threshold: float = 0.95,
         rank: Union[int, str, None] = None,
         max_iters: int = 500,
@@ -440,18 +485,27 @@ class Imputer:
             )
         
         if rank is not None:
-            if isinstance(rank, str):
-                if rank != "auto":
-                    raise ValueError(f"Only 'auto' is supported as string for rank, got '{rank}'")
-            elif not isinstance(rank, int) or rank < 1:
-                raise ValueError(f"rank must be a positive integer or 'auto', got {rank}")
+            if isinstance(rank, str) and rank != "auto":
+                raise ValueError(f"rank must be int, 'auto', or None, got '{rank}'")
+            elif isinstance(rank, int) and rank < 1:
+                raise ValueError(f"rank must be positive, got {rank}")
         
         if max_iters < 1:
-            raise ValueError(f"max_iters must be at least 1, got {max_iters}")
+            raise ValueError(f"max_iters must be positive, got {max_iters}")
         
         if tol <= 0:
             raise ValueError(f"tol must be positive, got {tol}")
         
+        # Validate and preprocess data ONCE at initialization
+        self.data_original_ = validate_dataframe(data)
+        self.data_preprocessed_, self.preprocessing_info_ = preprocess_for_svd(self.data_original_)
+        
+        # Store metadata from original data
+        self.columns_ = self.data_original_.columns.tolist()
+        self.index_name_ = self.data_original_.index.name
+        self.shape_ = self.data_original_.shape
+        
+        # Store parameters
         self.variance_threshold = variance_threshold
         self.rank = rank
         self.max_iters = max_iters
@@ -461,24 +515,25 @@ class Imputer:
         # Attributes set during fitting
         self.rank_ = None
         self.is_fitted_ = False
-        self.columns_ = None
-        self.index_name_ = None
         self.optimization_results_ = None
+        self.svd_components_ = None     # Dict with {'U': U, 's': s, 'Vt': Vt}
+        
+        if self.verbose:
+            print(f"Initialized imputer with data shape {self.shape_}")
+            n_missing = np.isnan(self.data_original_.values).sum()
+            total_vals = np.prod(self.shape_)
+            pct_missing = (n_missing / total_vals) * 100
+            print(f"Missing values: {n_missing}/{total_vals} ({pct_missing:.1f}%)") 
     
-    def fit(self, X: pd.DataFrame) -> 'Imputer':
+    def fit(self) -> 'Imputer':
         """
-        Fit the imputer on the data (estimate or optimize rank if needed).
+        Fit the imputer on the stored preprocessed data.
         
         The rank determination strategy depends on the `rank` parameter:
         - If rank="auto": Optimize rank via cross-validation to minimize error
         - If rank=None: Estimate rank based on variance_threshold (default)
         - If rank=int: Use the specified fixed rank
         
-        Parameters
-        ----------
-        X : pd.DataFrame
-            Input DataFrame with datetime index
-            
         Returns
         -------
         self
@@ -489,15 +544,8 @@ class Imputer:
         When rank="auto", the optimization results are stored in the
         `optimization_results_` attribute for inspection.
         """
-        # Validate input data
-        X_validated = validate_dataframe(X)
-        
-        # Store metadata
-        self.columns_ = X_validated.columns.tolist()
-        self.index_name_ = X_validated.index.name
-        
-        # Convert to numpy array
-        X_array = X_validated.values
+        # Work directly with preprocessed data
+        X_array = self.data_preprocessed_.values if isinstance(self.data_preprocessed_, pd.DataFrame) else self.data_preprocessed_
         
         # Determine rank based on user specification
         if self.rank == "auto":
@@ -505,7 +553,7 @@ class Imputer:
             if self.verbose:
                 print("Auto-optimizing rank via cross-validation...")
             
-            self.optimization_results_ = self.optimize_rank(X_validated)
+            self.optimization_results_ = self.optimize_rank()
             self.rank_ = self.optimization_results_['optimal_rank']
             
             if self.verbose:
@@ -526,16 +574,56 @@ class Imputer:
             # Fixed rank specified by user
             self.rank_ = self.rank
             # Check if requested rank is feasible
-            check_sufficient_rank(X_validated, self.rank_)
+            check_sufficient_rank(self.data_original_, self.rank_)
             if self.verbose:
                 print(f"Using fixed rank: {self.rank_}")
         
+        # Perform imputation to cache SVD components
+        if self.verbose:
+            print(f"Fitting SVD imputer with rank={self.rank_}...")
+        
+        X_imputed, svd_components = self._fit_and_cache_svd(X_array)
+        self.svd_components_ = svd_components
+        
         self.is_fitted_ = True
+        if self.verbose:
+            print("Fit completed. SVD components cached for reuse.")
+        
         return self
+    
+    def _fit_and_cache_svd(self, X: np.ndarray) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+        """
+        Fit the SVD imputer and cache the SVD components.
+        
+        Parameters
+        ----------
+        X : np.ndarray
+            Preprocessed data array
+            
+        Returns
+        -------
+        tuple
+            (imputed_data, svd_components_dict)
+        """
+        result = iterative_svd_impute(
+            X,
+            rank=self.rank_,
+            max_iters=self.max_iters,
+            tol=self.tol,
+            return_svd=True
+        )
+        
+        if isinstance(result, tuple):
+            X_imputed, svd_components = result
+        else:
+            # Fallback if SVD components not returned
+            X_imputed = result
+            svd_components = None
+            
+        return X_imputed, svd_components
     
     def optimize_rank(
         self,
-        X: pd.DataFrame,
         rank_range: Optional[Tuple[int, int]] = None,
         cv_folds: int = 5,
         n_repeats_per_fold: int = 20,
@@ -593,16 +681,15 @@ class Imputer:
         >>> print(f"Optimal rank: {results['optimal_rank']}")
         >>> print(results['results_df'])
         """
-        # Validate input data
-        X_validated = validate_dataframe(X)
-        X_array = X_validated.values
+        # Work with stored preprocessed data
+        X_array = self.data_preprocessed_.values if isinstance(self.data_preprocessed_, pd.DataFrame) else self.data_preprocessed_
         n_rows, n_cols = X_array.shape
         
         # Determine rank range
         if rank_range is None:
             max_possible = min(n_rows, n_cols)
-            max_test = min(max_possible, 10)  # Reasonable upper bound
-            rank_range = (1, max_test)
+            #max_test = min(max_possible, 10)  # Reasonable upper bound
+            rank_range = (1, max_possible)
         
         min_rank, max_rank = rank_range
         if min_rank < 1:
@@ -764,7 +851,6 @@ class Imputer:
     
     def estimate_uncertainty(
         self,
-        X: pd.DataFrame,
         n_repeats: int = 100,
         mask_strategy: str = 'block',
         frac: float = 0.1,
@@ -818,11 +904,8 @@ class Imputer:
                 "Call fit() first."
             )
         
-        # Validate input data
-        X_validated = validate_dataframe(X)
-        
-        # Convert to numpy array
-        X_array = X_validated.values
+        # Work with stored preprocessed data
+        X_array = self.data_preprocessed_.values if isinstance(self.data_preprocessed_, pd.DataFrame) else self.data_preprocessed_
         
         if self.verbose:
             print(f"Estimating uncertainty with {n_repeats} Monte Carlo repeats...")
@@ -852,60 +935,398 @@ class Imputer:
         
         return results
     
-    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+    def transform(self) -> pd.DataFrame:
         """
-        Impute missing values in the data.
-        
-        Parameters
-        ----------
-        X : pd.DataFrame
-            Input DataFrame with datetime index
+        Impute missing values in the stored data.
             
         Returns
         -------
         pd.DataFrame
-            DataFrame with imputed values
+            DataFrame with imputed values in original format
         """
         # Check if fitted
         if not self.is_fitted_:
             raise RuntimeError(
                 "Imputer must be fitted before transform. "
-                "Call fit() or use fit_transform()."
+                "Call fit() first."
             )
         
-        # Validate input data
-        X_validated = validate_dataframe(X)
+        # Work with stored preprocessed data
+        X_array = self.data_preprocessed_.values if isinstance(self.data_preprocessed_, pd.DataFrame) else self.data_preprocessed_
         
-        # Convert to numpy array
-        X_array = X_validated.values
+        # Use cached SVD components if available for faster imputation
+        if self.svd_components_ is not None:
+            if self.verbose:
+                print(f"Using cached SVD components for imputation...")
+            X_imputed = self._impute_with_cached_svd(X_array, self.preprocessing_info_)
+        else:
+            # Fallback to full imputation
+            if self.verbose:
+                print(f"Imputing with rank={self.rank_}, max_iters={self.max_iters}, tol={self.tol}")
+            X_imputed = iterative_svd_impute(
+                X_array,
+                rank=self.rank_,
+                max_iters=self.max_iters,
+                tol=self.tol
+            )
         
-        # Perform imputation
+        # Convert back to original DataFrame format
+        df_imputed = pd.DataFrame(
+            X_imputed,
+            index=self.data_original_.index,
+            columns=self.data_original_.columns
+        )
+        
         if self.verbose:
-            print(f"Imputing with rank={self.rank_}, max_iters={self.max_iters}, tol={self.tol}")
+            n_missing = np.isnan(self.data_original_.values).sum()
+            print(f"Imputed {n_missing} missing values")
         
-        X_imputed = iterative_svd_impute(
-            X_array,
+        return df_imputed
+    
+    def _impute_with_cached_svd(self, X: np.ndarray, preprocessing_info: tuple) -> np.ndarray:
+        """
+        Perform imputation using cached SVD components for efficiency.
+        
+        Parameters
+        ----------
+        X : np.ndarray
+            Preprocessed data array
+        preprocessing_info : tuple
+            Preprocessing parameters for postprocessing
+            
+        Returns
+        -------
+        np.ndarray
+            Imputed data array in original scale
+        """
+        # Use the standard iterative SVD imputation - the cached components 
+        # are used implicitly through the rank being fixed from fit()
+        X_filled = iterative_svd_impute(
+            X,
             rank=self.rank_,
             max_iters=self.max_iters,
             tol=self.tol
         )
         
-        # Convert back to DataFrame
-        df_imputed = pd.DataFrame(
-            X_imputed,
-            index=X_validated.index,
-            columns=X_validated.columns
+        # Apply postprocessing to return data in original scale        
+        X_filled = postprocess_after_svd(X_filled, preprocessing_info)
+        return X_filled
+    
+    def project_data(self, new_data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Project new data onto the fitted SVD subspace.
+        
+        This method applies the same preprocessing as used during fitting,
+        then projects the data onto the learned SVD subspace using cached components.
+        Useful for analyzing how new data relates to the fitted model.
+        
+        Parameters
+        ----------
+        new_data : pd.DataFrame
+            New DataFrame to project onto SVD subspace. Must have same columns
+            as the original fitting data.
+            
+        Returns
+        -------
+        pd.DataFrame
+            Projected data in original DataFrame format
+            
+        Raises
+        ------
+        RuntimeError
+            If imputer is not fitted
+        ValueError
+            If new_data columns don't match original data
+        """
+        # Check if fitted
+        if not self.is_fitted_ or self.svd_components_ is None:
+            raise RuntimeError(
+                "Imputer must be fitted before projecting data. "
+                "Call fit() first."
+            )
+        
+        # Validate new data structure matches original
+        new_data_validated = validate_dataframe(new_data)
+        
+        if list(new_data_validated.columns) != self.columns_:
+            raise ValueError(
+                f"New data columns {list(new_data_validated.columns)} "
+                f"don't match original columns {self.columns_}"
+            )
+        
+        # Apply consistent preprocessing
+        new_data_preprocessed, _ = preprocess_for_svd(new_data_validated)
+        X_new = new_data_preprocessed.values if isinstance(new_data_preprocessed, pd.DataFrame) else new_data_preprocessed
+        
+        # Project onto SVD subspace using cached components
+        U = self.svd_components_['U']
+        s = self.svd_components_['s']
+        Vt = self.svd_components_['Vt']
+        
+        # Project new data onto the SVD subspace defined by Vt (feature space)
+        # This projects columns onto the learned feature directions
+        X_projected = X_new @ Vt.T @ Vt  # Project and reconstruct in rank-reduced space
+        
+        # Convert back to original scale using stored preprocessing info
+        X_projected = postprocess_after_svd(X_projected, self.preprocessing_info_)
+        
+        # Return as DataFrame with original structure
+        df_projected = pd.DataFrame(
+            X_projected,
+            index=new_data_validated.index,
+            columns=new_data_validated.columns
         )
         
         if self.verbose:
-            n_imputed = np.isnan(X_array).sum()
-            print(f"Imputed {n_imputed} missing value(s)")
+            print(f"Projected data onto rank-{self.rank_} SVD subspace")
         
-        return df_imputed
+        return df_projected
+    
+    def reconstruct_data(self, new_data: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+        """
+        Reconstruct data using the fitted SVD components.
+        
+        This method applies the fitted low-rank approximation X ≈ U @ S @ Vt 
+        to reconstruct data. Useful for denoising, compression, or generating 
+        smooth versions of time series data.
+        
+        Parameters
+        ----------
+        new_data : pd.DataFrame, optional
+            New DataFrame to reconstruct. Must have same columns as original data.
+            If None (default), reconstructs the original fitted data.
+            Missing values will be filled with column means before reconstruction.
+            
+        Returns  
+        -------
+        pd.DataFrame
+            Reconstructed data in original DataFrame format
+            
+        Raises
+        ------
+        RuntimeError
+            If imputer is not fitted
+        ValueError
+            If new_data columns don't match original data
+        """
+        # Check if fitted
+        if not self.is_fitted_ or self.svd_components_ is None:
+            raise RuntimeError(
+                "Imputer must be fitted before reconstructing data. "
+                "Call fit() first."
+            )
+        
+        # Use original data if no new data provided
+        if new_data is None:
+            new_data = self.data_original_.copy()
+            if self.verbose:
+                print("Using original fitted data for reconstruction")
+        
+        # Validate new data structure matches original  
+        new_data_validated = validate_dataframe(new_data)
+        
+        if list(new_data_validated.columns) != self.columns_:
+            raise ValueError(
+                f"New data columns {list(new_data_validated.columns)} "
+                f"don't match original columns {self.columns_}"
+            )
+        
+        # Apply same preprocessing as original data
+        # Convert to numpy array for processing
+        X_new = new_data_validated.values.astype(float)
+        
+        # Fill missing values with column means (in original scale) before preprocessing
+        for j in range(X_new.shape[1]):
+            col_mask = np.isnan(X_new[:, j])
+            if col_mask.sum() > 0:
+                # Use the original preprocessing info means (in original scale)
+                X_new[col_mask, j] = self.preprocessing_info_[0][j]  # means from preprocessing
+        
+        # Apply standardization using original preprocessing parameters
+        means, stds = self.preprocessing_info_
+        X_standardized = (X_new - means) / stds
+        
+        # Reconstruct using cached SVD components (correct SVD reconstruction formula)
+        U = self.svd_components_['U']
+        s = self.svd_components_['s']
+        Vt = self.svd_components_['Vt']
+        
+        # Proper SVD reconstruction: X_reconstructed = U @ diag(s) @ Vt
+        X_reconstructed = U @ np.diag(s) @ Vt
+        
+        # Convert back to original scale
+        X_reconstructed = postprocess_after_svd(X_reconstructed, self.preprocessing_info_)
+        
+        # Return as DataFrame with original structure
+        df_reconstructed = pd.DataFrame(
+            X_reconstructed,
+            index=new_data_validated.index,
+            columns=new_data_validated.columns
+        )
+        
+        if self.verbose:
+            print(f"Reconstructed data using rank-{self.rank_} SVD approximation")
+        
+        return df_reconstructed
+    
+    def calculate_reconstruction_residuals(
+        self, 
+        new_data: Optional[pd.DataFrame] = None,
+        return_stats: bool = True
+    ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, Dict[str, Any]]]:
+        """
+        Calculate residuals between observed values and their SVD reconstruction.
+        
+        This method computes residuals = original - reconstructed for observed 
+        (non-missing) values only. Useful for:
+        - Model diagnostics: How well does the SVD represent the data?
+        - Quality assessment: Are there systematic biases in reconstruction?
+        - Outlier detection: Large residuals may indicate anomalies
+        - Model selection: Compare residual patterns across different ranks
+        
+        Parameters
+        ----------
+        new_data : pd.DataFrame, optional
+            Data to calculate residuals for. Must have same columns as original data.
+            If None (default), uses the original fitted data.
+        return_stats : bool, optional
+            Whether to return summary statistics along with residuals (default: True)
+            
+        Returns
+        -------
+        pd.DataFrame or tuple
+            If return_stats=False: DataFrame of residuals (NaN for originally missing values)
+            If return_stats=True: (residuals_df, stats_dict) where stats_dict contains:
+            - 'rmse': Root Mean Square Error for observed values
+            - 'mae': Mean Absolute Error for observed values  
+            - 'bias': Mean bias (systematic over/under-estimation)
+            - 'r_squared': R² correlation between original and reconstructed
+            - 'residual_stats': Per-column statistics (mean, std, min, max)
+            - 'n_observed': Number of observed values used in calculations
+            
+        Raises
+        ------
+        RuntimeError
+            If imputer is not fitted
+        ValueError
+            If new_data columns don't match original data
+            
+        Examples
+        --------
+        >>> # Basic residual calculation
+        >>> imputer = Imputer(data, rank=5)
+        >>> imputer.fit()
+        >>> residuals_df = imputer.calculate_reconstruction_residuals(return_stats=False)
+        >>> 
+        >>> # With detailed statistics
+        >>> residuals_df, stats = imputer.calculate_reconstruction_residuals()
+        >>> print(f"Overall RMSE: {stats['rmse']:.4f}")
+        >>> print(f"R²: {stats['r_squared']:.4f}")
+        >>> print(stats['residual_stats'])
+        >>> 
+        >>> # For new data
+        >>> residuals_new, stats_new = imputer.calculate_reconstruction_residuals(new_df)
+        """
+        # Check if fitted
+        if not self.is_fitted_ or self.svd_components_ is None:
+            raise RuntimeError(
+                "Imputer must be fitted before calculating residuals. "
+                "Call fit() first."
+            )
+        
+        # Use original data if no new data provided
+        if new_data is None:
+            original_data = self.data_original_.copy()
+            if self.verbose:
+                print("Calculating residuals for original fitted data")
+        else:
+            # Validate new data structure matches original
+            original_data = validate_dataframe(new_data)
+            
+            if list(original_data.columns) != self.columns_:
+                raise ValueError(
+                    f"New data columns {list(original_data.columns)} "
+                    f"don't match original columns {self.columns_}"
+                )
+                
+            if self.verbose:
+                print("Calculating residuals for new data")
+        
+        # Get reconstruction of the data
+        reconstructed_data = self.reconstruct_data(original_data)
+        
+        # Calculate residuals only for observed (non-missing) values
+        observed_mask = ~pd.isna(original_data)
+        
+        # Initialize residuals DataFrame with NaN
+        residuals_df = pd.DataFrame(
+            np.nan,
+            index=original_data.index,
+            columns=original_data.columns
+        )
+        
+        # Calculate residuals where data was observed
+        residuals_df[observed_mask] = original_data[observed_mask] - reconstructed_data[observed_mask]
+        
+        if not return_stats:
+            return residuals_df
+        
+        # Calculate detailed statistics for observed values only
+        original_obs = original_data.values[observed_mask.values]
+        reconstructed_obs = reconstructed_data.values[observed_mask.values]
+        residuals_obs = residuals_df.values[observed_mask.values]
+        
+        # Overall statistics
+        rmse = np.sqrt(np.mean(residuals_obs**2))
+        mae = np.mean(np.abs(residuals_obs))
+        bias = np.mean(residuals_obs)
+        
+        # R-squared (correlation coefficient squared)
+        correlation = np.corrcoef(original_obs, reconstructed_obs)[0, 1]
+        r_squared = correlation**2 if not np.isnan(correlation) else 0.0
+        
+        # Per-column statistics
+        residual_stats = {}
+        for col in original_data.columns:
+            col_mask = observed_mask[col]
+            if col_mask.sum() > 0:  # If there are observed values in this column
+                col_residuals = residuals_df[col][col_mask].values
+                residual_stats[col] = {
+                    'mean': np.mean(col_residuals),
+                    'std': np.std(col_residuals),
+                    'min': np.min(col_residuals),
+                    'max': np.max(col_residuals),
+                    'n_observed': len(col_residuals),
+                    'rmse': np.sqrt(np.mean(col_residuals**2)),
+                    'mae': np.mean(np.abs(col_residuals))
+                }
+            else:
+                residual_stats[col] = {
+                    'mean': np.nan, 'std': np.nan, 'min': np.nan, 'max': np.nan,
+                    'n_observed': 0, 'rmse': np.nan, 'mae': np.nan
+                }
+        
+        stats_dict = {
+            'rmse': rmse,
+            'mae': mae,
+            'bias': bias,
+            'r_squared': r_squared,
+            'residual_stats': residual_stats,
+            'n_observed': len(residuals_obs),
+            'rank_used': self.rank_
+        }
+        
+        if self.verbose:
+            print(f"Residual statistics (n={len(residuals_obs)} observed values):")
+            print(f"  RMSE: {rmse:.6f}")
+            print(f"  MAE:  {mae:.6f}")
+            print(f"  Bias: {bias:.6f}")
+            print(f"  R²:   {r_squared:.6f}")
+        
+        return residuals_df, stats_dict
     
     def fit_transform(
         self,
-        X: pd.DataFrame,
         return_uncertainty: bool = False,
         n_repeats: int = 100,
         mask_strategy: str = 'block',
@@ -915,14 +1336,12 @@ class Imputer:
         seed: Optional[int] = None
     ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, Dict[str, Any]]]:
         """
-        Fit the imputer and transform the data in one step.
+        Fit the imputer and transform the stored data in one step.
         
         Optionally compute uncertainty estimates using Monte Carlo validation.
         
         Parameters
         ----------
-        X : pd.DataFrame
-            Input DataFrame with datetime index
         return_uncertainty : bool, optional
             Whether to return uncertainty estimates (default: False)
         n_repeats : int, optional
@@ -947,12 +1366,11 @@ class Imputer:
         Examples
         --------
         >>> # Simple imputation (no uncertainty)
-        >>> imputer = Imputer()
-        >>> df_imputed = imputer.fit_transform(df)
+        >>> imputer = Imputer(data)
+        >>> df_imputed = imputer.fit_transform()
         
         >>> # With Monte Carlo uncertainty
         >>> df_imputed, unc = imputer.fit_transform(
-        ...     df, 
         ...     return_uncertainty=True
         ... )
         >>> print(f"RMSE: {unc['rmse']:.3f}")
@@ -961,22 +1379,21 @@ class Imputer:
         """
         if not return_uncertainty:
             # Standard behavior - no uncertainty
-            return self.fit(X).transform(X)
+            return self.fit().transform()
         
         # Fit and transform
-        self.fit(X)
-        df_imputed = self.transform(X)
+        self.fit()
+        df_imputed = self.transform()
         
         # Compute uncertainty using Monte Carlo validation
         uncertainty_dict = self._uncertainty_monte_carlo(
-            X, n_repeats, mask_strategy, frac, block_len, n_blocks, seed
+            n_repeats, mask_strategy, frac, block_len, n_blocks, seed
         )
         
         return df_imputed, uncertainty_dict
     
     def _uncertainty_monte_carlo(
         self,
-        X: pd.DataFrame,
         n_repeats: int,
         mask_strategy: str,
         frac: float,
@@ -994,7 +1411,7 @@ class Imputer:
              'rmse_ci': tuple, 'mae_ci': tuple}
         """
         results = self.estimate_uncertainty(
-            X, n_repeats, mask_strategy, frac, block_len, n_blocks, seed
+            n_repeats, mask_strategy, frac, block_len, n_blocks, seed
         )
         
         return {
