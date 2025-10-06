@@ -22,9 +22,9 @@ def test_basic_imputation():
     df.iloc[5:10, 0] = np.nan
     df.iloc[15:20, 1] = np.nan
     
-    # Impute
-    imputer = Imputer(verbose=False)
-    df_imputed = imputer.fit_transform(df)
+    # Impute using new data-centric API
+    imputer = Imputer(data=df, verbose=False)
+    df_imputed = imputer.fit_transform()
     
     # Check no missing values remain
     assert df_imputed.isna().sum().sum() == 0, "Missing values remain!"
@@ -46,8 +46,8 @@ def test_automatic_rank():
     
     df.iloc[::5, :] = np.nan
     
-    imputer = Imputer(variance_threshold=0.95, verbose=False)
-    df_imputed = imputer.fit_transform(df)
+    imputer = Imputer(data=df, variance_threshold=0.95, verbose=False)
+    df_imputed = imputer.fit_transform()
     
     assert imputer.rank_ is not None, "Rank not estimated!"
     assert imputer.rank_ >= 1, f"Invalid rank: {imputer.rank_}"
@@ -68,8 +68,8 @@ def test_fixed_rank():
     
     df.iloc[::3, :] = np.nan
     
-    imputer = Imputer(rank=1, verbose=False)
-    df_imputed = imputer.fit_transform(df)
+    imputer = Imputer(data=df, rank=1, verbose=False)
+    df_imputed = imputer.fit_transform()
     
     assert imputer.rank_ == 1, f"Rank should be 1, got {imputer.rank_}"
     assert df_imputed.isna().sum().sum() == 0, "Missing values remain!"
@@ -84,8 +84,7 @@ def test_validation_errors():
     # Test non-datetime index
     df = pd.DataFrame({'A': [1, 2, 3]})
     try:
-        imputer = Imputer(verbose=False)
-        imputer.fit_transform(df)
+        imputer = Imputer(data=df, verbose=False)
         assert False, "Should have raised ValueError"
     except ValueError as e:
         assert "DatetimeIndex" in str(e)
@@ -94,8 +93,7 @@ def test_validation_errors():
     dates = pd.date_range('2020-01-01', periods=10, freq='D')
     df = pd.DataFrame({'A': range(10)}, index=dates[[5, 3, 7, 1, 9, 0, 2, 4, 6, 8]])
     try:
-        imputer = Imputer(verbose=False)
-        imputer.fit_transform(df)
+        imputer = Imputer(data=df, verbose=False)
         assert False, "Should have raised ValueError"
     except ValueError as e:
         assert "sorted" in str(e).lower()
@@ -114,51 +112,46 @@ def test_fit_transform_separately():
     }, index=dates1)
     df1.iloc[::5, :] = np.nan
     
-    dates2 = pd.date_range('2020-03-01', periods=30, freq='D')
-    df2 = pd.DataFrame({
-        'A': np.random.randn(30),
-        'B': np.random.randn(30)
-    }, index=dates2)
-    df2.iloc[::4, :] = np.nan
-    
+    # With data-centric design, each imputer is fitted to specific data
     # Fit on df1
-    imputer = Imputer(verbose=False)
-    imputer.fit(df1)
+    imputer = Imputer(data=df1, verbose=False)
+    imputer.fit()
     rank_used = imputer.rank_
     
-    # Transform df1
-    df1_imputed = imputer.transform(df1)
+    # Transform same data
+    df1_imputed = imputer.transform()
     assert df1_imputed.isna().sum().sum() == 0
-    
-    # Transform df2 (using same rank)
-    df2_imputed = imputer.transform(df2)
-    assert df2_imputed.isna().sum().sum() == 0
     assert imputer.rank_ == rank_used, "Rank changed!"
+    
+    # Test that we can call fit_transform after fit
+    df1_imputed2 = imputer.fit_transform()
+    assert df1_imputed2.isna().sum().sum() == 0
     
     print("✓ PASSED")
 
 
-def test_with_scaler():
-    """Test with StandardScaler."""
-    print("Test 6: With StandardScaler... ", end="")
-    
-    from sklearn.preprocessing import StandardScaler
+def test_uncertainty_estimation():
+    """Test uncertainty estimation."""
+    print("Test 6: Uncertainty estimation... ", end="")
     
     dates = pd.date_range('2020-01-01', periods=50, freq='D')
     df = pd.DataFrame({
-        'A': np.random.randn(50) * 100 + 1000,  # Large scale
-        'B': np.random.randn(50) * 0.1 + 5     # Small scale
+        'A': np.random.randn(50),
+        'B': np.random.randn(50)
     }, index=dates)
     
     df.iloc[::5, :] = np.nan
     
-    imputer = Imputer(scaler=StandardScaler(), verbose=False)
-    df_imputed = imputer.fit_transform(df)
+    # Test with uncertainty estimation
+    imputer = Imputer(data=df, verbose=False)
+    df_imputed, uncertainty = imputer.fit_transform(return_uncertainty=True, n_repeats=20)
     
     assert df_imputed.isna().sum().sum() == 0
-    # Check that scale is preserved (not normalized)
-    assert df_imputed['A'].mean() > 900  # Should be near 1000
-    assert df_imputed['B'].mean() < 10   # Should be near 5
+    assert uncertainty is not None
+    assert 'rmse' in uncertainty
+    assert 'mae' in uncertainty
+    assert 'method' in uncertainty
+    assert uncertainty['method'] == 'monte_carlo'
     
     print("✓ PASSED")
 
@@ -186,8 +179,8 @@ def test_rank_optimization():
     df.iloc[::6, :] = np.nan
     
     # Test rank optimization
-    imputer = Imputer(rank="auto", verbose=False)
-    df_imputed = imputer.fit_transform(df)
+    imputer = Imputer(data=df, rank="auto", verbose=False)
+    df_imputed = imputer.fit_transform()
     
     # Verify results
     assert df_imputed.isna().sum().sum() == 0, "Missing values remain!"
@@ -213,17 +206,21 @@ def test_rank_auto_validation():
     """Test rank='auto' parameter validation."""
     print("Test 8: Rank parameter validation... ", end="")
     
+    # Create dummy data for validation
+    dates = pd.date_range('2020-01-01', periods=10, freq='D')
+    df = pd.DataFrame({'A': range(10), 'B': range(10)}, index=dates)
+    
     # Test invalid string
     try:
-        imputer = Imputer(rank="invalid")
+        imputer = Imputer(data=df, rank="invalid")
         assert False, "Should raise ValueError for invalid string"
     except ValueError as e:
-        assert "Only 'auto' is supported" in str(e)
+        assert "rank must be int, 'auto', or None" in str(e)
     
     # Test valid values
-    imputer1 = Imputer(rank="auto")  # Should work
-    imputer2 = Imputer(rank=3)       # Should work
-    imputer3 = Imputer(rank=None)    # Should work
+    imputer1 = Imputer(data=df, rank="auto")  # Should work
+    imputer2 = Imputer(data=df, rank=3)       # Should work
+    imputer3 = Imputer(data=df, rank=None)    # Should work
     
     assert imputer1.rank == "auto"
     assert imputer2.rank == 3
@@ -244,7 +241,7 @@ def run_all_tests():
         test_fixed_rank,
         test_validation_errors,
         test_fit_transform_separately,
-        test_with_scaler,
+        test_uncertainty_estimation,
         test_rank_optimization,
         test_rank_auto_validation
     ]
