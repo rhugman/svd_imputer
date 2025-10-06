@@ -156,7 +156,37 @@ def check_sufficient_rank(df: pd.DataFrame, min_rank: int = 1) -> None:
 
 
 def detrend_timeseries(X):
-    """Detrend each column (time series)"""
+    """
+    Remove linear trends from each column (time series) in a 2D array.
+
+    For each column, fits a linear trend (using least squares) to the observed (non-NaN)
+    values and subtracts this trend from the entire column. The function returns both
+    the detrended data and the estimated trends.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        2D array of shape (n_samples, n_series), where each column is a time series.
+        May contain NaN values, which are ignored when fitting the trend.
+
+    Returns
+    -------
+    X_detrended : np.ndarray
+        Array of the same shape as `X`, with the linear trend removed from each column.
+    trends : np.ndarray
+        Array of the same shape as `X`, containing the estimated linear trend for each column.
+
+    Notes
+    -----
+    - Columns with fewer than 2 non-NaN values are left unchanged (trend is zero).
+    - NaN values in `X` are preserved in the output.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> X = np.array([[1, 2], [2, 4], [3, 6], [np.nan, 8]])
+    >>> X_detrended, trends = detrend_timeseries(X)
+    """
     X_detrended = np.copy(X)
     trends = np.zeros_like(X)
     
