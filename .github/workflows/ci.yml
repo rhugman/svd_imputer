@@ -5,6 +5,7 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  workflow_call:  # Allow calling from other workflows
   workflow_dispatch:  # Allow manual triggering
   schedule:
     # Run tests weekly on Sundays at 02:00 UTC
@@ -183,7 +184,7 @@ jobs:
       continue-on-error: true
       
     - name: Upload documentation artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: documentation
         path: docs/_build/html/
@@ -214,7 +215,7 @@ jobs:
         python -m twine check dist/*
         
     - name: Upload package artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: packages
         path: dist/

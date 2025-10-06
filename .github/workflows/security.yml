@@ -60,17 +60,11 @@ jobs:
         semgrep --config=auto svd_imputer/
       continue-on-error: true
       
-    - name: Upload security reports
-      uses: actions/upload-artifact@v3
+    - name: Upload SARIF file
+      uses: actions/upload-artifact@v4
       with:
-        name: security-reports
-        path: |
-          bandit-report.json
-          safety-report.json
-          pip-audit-report.json
-          pip-audit-cyclone.json
-          semgrep-report.json
-        retention-days: 30
+        name: bandit-sarif
+        path: bandit-results.sarif
 
   # Job 2: Dependency Vulnerability Scanning
   dependency-check:
@@ -104,7 +98,7 @@ jobs:
       continue-on-error: true
       
     - name: Upload OWASP Dependency Check results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: dependency-check-reports
         path: reports/
@@ -155,7 +149,7 @@ jobs:
       continue-on-error: true
       
     - name: Upload secret scan results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: secret-scan-reports
         path: trufflehog-report.json
@@ -192,7 +186,7 @@ jobs:
       continue-on-error: true
       
     - name: Upload license reports
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: license-reports
         path: |
@@ -242,7 +236,7 @@ jobs:
     if: always()
     steps:
     - name: Download all security reports
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         path: security-reports
         
@@ -282,7 +276,7 @@ jobs:
         cat security-summary.md
         
     - name: Upload security summary
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: security-summary
         path: security-summary.md
