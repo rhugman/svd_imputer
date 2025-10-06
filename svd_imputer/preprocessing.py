@@ -212,3 +212,131 @@ def postprocess_after_svd(X_imputed, preprocessing_info):
     #X = X + trends
     
     return X
+
+
+def create_derivative_augmented_matrix(df):
+    """
+    Augment DataFrame with first and second differences.
+    
+    Creates columns: [original, first_diff, second_diff]
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Time series DataFrame with datetime index
+        
+    Returns
+    -------
+    pd.DataFrame
+        Augmented DataFrame with original column names preserved
+        Format: original cols, then _d1 suffix, then _d2 suffix
+        Index is aligned to match valid rows (loses first 2 rows)
+    """
+    # Calculate differences
+    df_d1 = df.diff()  # First difference
+    df_d2 = df_d1.diff()  # Second difference
+    
+    # Align to valid rows (where second difference exists)
+    # This means dropping first 2 rows
+    valid_idx = df.index[2:]
+    df_aligned = df.loc[valid_idx]
+    df_d1_aligned = df_d1.loc[valid_idx]
+    df_d2_aligned = df_d2.loc[valid_idx]
+    
+    # Rename columns to show what they represent
+    df_d1_renamed = df_d1_aligned.add_suffix('_d1')
+    df_d2_renamed = df_d2_aligned.add_suffix('_d2')
+    
+    # Concatenate horizontally
+    df_aug = pd.concat([df_aligned, df_d1_renamed, df_d2_renamed], axis=1)
+    
+    return df_aug
+
+
+def create_symmetric_augmented_matrix(df, window=1):
+    """
+    Include past and future lags: [X_{t-w}, ..., X_{t}, ..., X_{t+w}]
+    
+    Better for interpolation (gaps in middle of series).
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Time series DataFrame with datetime index
+    window : int
+        Number of time steps to include before and after current time
+        
+    Returns
+    -------
+    pd.DataFrame
+        Augmented DataFrame with lag suffixes
+        Format: col_name_lag-3, col_name_lag-2, ..., col_name_lag0, ..., col_name_lag+3
+        Index corresponds to "current" time (center of window)
+    """
+    lags = list(range(-window, window + 1))
+    
+    # Valid index range (center of windows)
+    valid_idx = df.index[window:-window]
+    
+    # Build list of shifted dataframes
+    df_list = []
+    
+    for lag in lags:
+        if lag == 0:
+            # Current time - no suffix needed for clarity, but let's be consistent
+            df_shifted = df.shift(-lag).loc[valid_idx]
+            df_shifted = df_shifted.add_suffix(f'_lag{lag:+d}')
+        elif lag < 0:
+            # Past values: shift forward (positive shift gets past values)
+            df_shifted = df.shift(-lag).loc[valid_idx]
+            df_shifted = df_shifted.add_suffix(f'_lag{lag:+d}')
+        else:
+            # Future values: shift backward (negative shift gets future values)
+            df_shifted = df.shift(-lag).loc[valid_idx]
+            df_shifted = df_shifted.add_suffix(f'_lag{lag:+d}')
+        
+        df_list.append(df_shifted)
+    
+    # Concatenate all lagged versions
+    df_aug = pd.concat(df_list, axis=1)
+    
+    return df_aug
+
+
+def create_asymmetric_augmented_matrix(df, past_lags=[1]):
+    """
+    Include only past lags (useful for forecasting scenarios).
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Time series DataFrame with datetime index
+    past_lags : list of int
+        Lags to include (positive integers for past values)
+        
+    Returns
+    -------
+    pd.DataFrame
+        Augmented DataFrame with current values and past lags
+        Format: col_name_lag0, col_name_lag-1, col_name_lag-2, ...
+    """
+    max_lag = max(past_lags)
+    
+    # Valid index (need max_lag historical values)
+    valid_idx = df.index[max_lag:]
+    
+    df_list = []
+    
+    # Current time (lag 0)
+    df_current = df.loc[valid_idx].add_suffix('_lag0')
+    df_list.append(df_current)
+    
+    # Past lags
+    for lag in sorted(past_lags):
+        df_shifted = df.shift(lag).loc[valid_idx]
+        df_shifted = df_shifted.add_suffix(f'_lag-{lag}')
+        df_list.append(df_shifted)
+    
+    df_aug = pd.concat(df_list, axis=1)
+    
+    return df_aug

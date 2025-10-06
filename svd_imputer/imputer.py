@@ -65,6 +65,37 @@ def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95) -> int:
     
     return int(rank)
 
+def compute_low_rank_approximation(X: np.ndarray, rank: int) -> np.ndarray:
+    """
+    Compute low-rank approximation of the input matrix using SVD.
+    
+    Parameters
+    ----------
+    X : np.ndarray
+        Input data matrix
+    rank : int
+        Desired rank for the approximation
+
+    Returns
+    -------
+    np.ndarray
+        Low-rank approximation of the input matrix
+    """
+    # Perform SVD
+    try:
+        U, s, Vt = np.linalg.svd(X, full_matrices=False)
+    except np.linalg.LinAlgError:
+        warnings.warn(
+            f"SVD failed at iteration. Returning current state.",
+            RuntimeWarning
+        )
+        return X
+    
+    # Low-rank approximation
+    S = np.diag(s[:rank])
+    X_approx = U[:, :rank] @ S @ Vt[:rank, :]
+    return X_approx
+
 
 def iterative_svd_impute(
     X: np.ndarray,
@@ -124,18 +155,7 @@ def iterative_svd_impute(
     converged = False
     for it in range(max_iters):
         # Compute SVD
-        try:
-            U, s, Vt = np.linalg.svd(X_filled, full_matrices=False)
-        except np.linalg.LinAlgError:
-            warnings.warn(
-                f"SVD failed at iteration {it}. Returning current state.",
-                RuntimeWarning
-            )
-            break
-        
-        # Low-rank approximation
-        S = np.diag(s[:rank])
-        X_approx = U[:, :rank] @ S @ Vt[:rank, :]
+        X_approx = compute_low_rank_approximation(X_filled, rank)
         
         # Update only the originally missing entries
         X_new = X_filled.copy()
