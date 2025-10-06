@@ -1,6 +1,6 @@
 # SVD Time Series Imputer
 
-A simple and efficient Python package for time series imputation using Singular Value Decomposition (SVD) wand imputation error/uncertainty quantification.
+A simple and efficient Python package for time series imputation using Singular Value Decomposition (SVD) and imputation error/uncertainty quantification.
 
 ## Table of Contents
 - [Features](#features)
