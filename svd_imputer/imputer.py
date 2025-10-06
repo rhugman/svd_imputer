@@ -5,14 +5,38 @@ This module contains the core SVD imputation algorithm, rank estimation,
 and the main Imputer class.
 """
 
+import logging
 import numpy as np
 import pandas as pd
 import warnings
 from typing import Optional, Union, Tuple, Dict, Any
 from math import sqrt
-from statistics import mean, stdev
+from statistics import mean
 
 from .preprocessing import validate_dataframe, check_sufficient_rank, preprocess_for_svd, postprocess_after_svd
+
+# Configure logger for this module
+logger = logging.getLogger(__name__)
+
+def _configure_logger():
+    """Configure logger with appropriate defaults if not already configured."""
+    # Only configure if no handlers exist and no parent handlers exist
+    if not logger.handlers and not logger.parent.handlers:
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False  # Prevent duplicate messages
+    
+    # If parent has handlers, use those and just set level if needed
+    elif logger.parent.handlers and logger.level == logging.NOTSET:
+        logger.setLevel(logging.INFO)
+
+# Configure logger
+_configure_logger()
 
 
 def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95) -> int:
@@ -43,9 +67,11 @@ def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95) -> int:
     X_temp, _ = preprocess_for_svd(X)
     
     # Perform SVD
+    logger.debug(f"Computing SVD for rank estimation on {X_temp.shape} matrix")
     try:
         _, s, _ = np.linalg.svd(X_temp, full_matrices=False)
     except np.linalg.LinAlgError:
+        logger.warning("SVD computation failed during rank estimation. Using rank=1 as fallback.")
         warnings.warn(
             "SVD computation failed. Using rank=1 as fallback.",
             RuntimeWarning
@@ -62,6 +88,9 @@ def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95) -> int:
     # Ensure rank is at least 1 and at most min(n_rows, n_cols)
     max_rank = len(s)
     rank = max(1, min(rank, max_rank))
+    
+    logger.debug(f"Estimated rank {rank} for variance threshold {variance_threshold:.1%} "
+                f"(captures {cumulative_variance[rank-1]:.1%} variance)")
     
     return int(rank)
 
@@ -164,12 +193,14 @@ def iterative_svd_impute(
     # Step 2: Iterative updates
     converged = False
     final_svd = None
+    logger.debug(f"Starting iterative SVD imputation (rank={rank}, max_iters={max_iters}, tol={tol})")
     for it in range(max_iters):
         # Compute SVD and store components for potential return
         try:
             U, s, Vt = np.linalg.svd(X_filled, full_matrices=False)
             final_svd = {'U': U[:, :rank], 's': s[:rank], 'Vt': Vt[:rank, :]}
         except np.linalg.LinAlgError:
+            logger.warning(f"SVD failed at iteration {it}. Returning current state.")
             warnings.warn(
                 f"SVD failed at iteration {it}. Returning current state.",
                 RuntimeWarning
@@ -189,6 +220,7 @@ def iterative_svd_impute(
         
         if diff < tol:
             converged = True
+            logger.debug(f"SVD imputation converged at iteration {it+1} (diff={diff:.2e})")
             break
     
     # Warn if didn't converge
@@ -219,14 +251,23 @@ def _mae(true: np.ndarray, pred: np.ndarray) -> float:
 
 def _random_mask_observed(X: np.ndarray, frac: float = 0.1, seed: Optional[int] = None) -> np.ndarray:
     """
-    Randomly mask a fraction of observed values for validation.
+    Safely mask observed values by going row-by-row, ensuring no entirely NaN rows.
+    
+    This improved algorithm prevents the creation of entirely NaN rows that would
+    get filled with column means during imputation, eliminating bias in Monte Carlo validation.
+    
+    Algorithm:
+    1. Go through rows in random order
+    2. Skip rows with ≤1 non-missing value (to preserve at least 1 observation per row)
+    3. In each eligible row, randomly mask columns (max n_cols - 1)
+    4. Continue until target fraction is achieved
     
     Parameters
     ----------
     X : np.ndarray
         Input array with np.nan for missing values
     frac : float
-        Fraction of observed values to mask
+        Target fraction of observed values to mask
     seed : int, optional
         Random seed
         
@@ -234,22 +275,79 @@ def _random_mask_observed(X: np.ndarray, frac: float = 0.1, seed: Optional[int] 
     -------
     np.ndarray
         Boolean mask (True = observed, False = masked)
+        
+    Notes
+    -----
+    This function guarantees that no rows will become entirely NaN after masking,
+    preventing the mean-filling bias that can occur in Monte Carlo validation.
     """
     rng = np.random.default_rng(seed)
-    mask = ~np.isnan(X)  # True = observed
-    obs_indices = np.argwhere(mask)
-    n_hide = int(len(obs_indices) * frac)
-    hide_idx = rng.choice(len(obs_indices), size=n_hide, replace=False)
-    for idx in hide_idx:
-        r, c = obs_indices[idx]
-        mask[r, c] = False
+    mask = ~np.isnan(X)  # True = observed, False = masked
+    
+    # Count total observed values and target number to mask
+    total_observed = np.sum(mask)
+    target_to_mask = int(total_observed * frac)
+    
+    if target_to_mask == 0:
+        return mask  # Nothing to mask
+    
+    # Create list of row indices in random order
+    n_rows, n_cols = X.shape
+    row_indices = np.arange(n_rows)
+    rng.shuffle(row_indices)
+    
+    masked_count = 0
+    
+    # Go through rows in random order
+    for row_idx in row_indices:
+        if masked_count >= target_to_mask:
+            break
+            
+        # Get observed positions in this row
+        row_observed = mask[row_idx, :]
+        n_observed_in_row = np.sum(row_observed)
+        
+        # Skip rows with ≤ 1 observed value (can't safely mask anything)
+        if n_observed_in_row <= 1:
+            continue
+            
+        # Determine how many columns to mask in this row
+        # - Maximum: n_observed - 1 (leave at least 1 observed)
+        # - Target: remaining values to mask
+        max_to_mask_in_row = n_observed_in_row - 1
+        remaining_to_mask = target_to_mask - masked_count
+        n_to_mask_in_row = min(max_to_mask_in_row, remaining_to_mask)
+        
+        if n_to_mask_in_row <= 0:
+            continue
+            
+        # Get column indices of observed values in this row
+        observed_cols = np.where(row_observed)[0]
+        
+        # Randomly select columns to mask
+        cols_to_mask = rng.choice(observed_cols, size=n_to_mask_in_row, replace=False)
+        
+        # Apply masking
+        mask[row_idx, cols_to_mask] = False
+        masked_count += n_to_mask_in_row
+    
     return mask
 
 
 def _block_mask_time(X: np.ndarray, block_len: int = 5, n_blocks: int = 1, 
                      seed: Optional[int] = None) -> np.ndarray:
     """
-    Mask temporal blocks of observed values for validation.
+    Safely mask temporal blocks ensuring no entirely NaN rows.
+    
+    This improved algorithm prevents the creation of entirely NaN rows by validating
+    each block placement before applying it.
+    
+    Algorithm:
+    1. For each block to place:
+       - Try random starting positions
+       - For each position, check if masking would create entirely NaN rows
+       - Apply masking only if safe (leaves at least 1 observed value per row)
+    2. If can't place requested blocks safely, place as many as possible
     
     Parameters
     ----------
@@ -266,19 +364,70 @@ def _block_mask_time(X: np.ndarray, block_len: int = 5, n_blocks: int = 1,
     -------
     np.ndarray
         Boolean mask (True = observed, False = masked)
+        
+    Notes
+    -----
+    This function guarantees that no rows will become entirely NaN after masking.
+    If the data is too sparse to safely place all requested blocks, fewer blocks
+    will be placed to maintain data integrity.
     """
     rng = np.random.default_rng(seed)
-    mask = ~np.isnan(X)
-    n_rows, _ = X.shape
-    for _ in range(n_blocks):
-        start = rng.integers(0, max(1, n_rows - block_len + 1))
-        end = min(start + block_len, n_rows)  # Ensure we don't exceed array bounds
-        rows = range(start, end)
-        # Hide those rows across all columns that are observed
-        for r in rows:
-            for c in range(X.shape[1]):
-                if not np.isnan(X[r, c]):
-                    mask[r, c] = False
+    mask = ~np.isnan(X)  # True = observed, False = masked
+    n_rows, n_cols = X.shape
+    
+    blocks_placed = 0
+    max_attempts = n_blocks * 50  # Limit attempts to avoid infinite loops
+    
+    for attempt in range(max_attempts):
+        if blocks_placed >= n_blocks:
+            break
+            
+        # Random starting position
+        start_row = rng.integers(0, max(1, n_rows - block_len + 1))
+        end_row = min(start_row + block_len, n_rows)
+        block_rows = list(range(start_row, end_row))
+        
+        # Test if masking this block would create entirely NaN rows
+        test_mask = mask.copy()
+        
+        # Temporarily mask the block
+        for r in block_rows:
+            for c in range(n_cols):
+                if mask[r, c]:  # Only mask currently observed values
+                    test_mask[r, c] = False
+        
+        # Check if any rows became entirely NaN
+        any_entirely_nan = False
+        for r in block_rows:
+            if not np.any(test_mask[r, :]):  # Row has no True values
+                any_entirely_nan = True
+                break
+        
+        # If safe, apply the masking
+        if not any_entirely_nan:
+            mask = test_mask
+            blocks_placed += 1
+    
+    if blocks_placed < n_blocks:
+        logger.warning(f"Could only place {blocks_placed}/{n_blocks} blocks safely. "
+                      f"Data may be too sparse for requested block masking.")
+        warnings.warn(
+            f"Could only place {blocks_placed}/{n_blocks} blocks safely. "
+            f"Data may be too sparse for requested block masking.",
+            RuntimeWarning
+        )
+        
+        # If no blocks could be placed, fall back to random masking to ensure Monte Carlo diversity
+        if blocks_placed == 0:
+            logger.warning(f"No blocks could be placed safely. Falling back to random masking with frac=0.1 "
+                          f"to ensure Monte Carlo validation diversity.")
+            warnings.warn(
+                f"No blocks could be placed safely. Falling back to random masking with frac=0.1 "
+                f"to ensure Monte Carlo validation diversity.",
+                RuntimeWarning
+            )
+            return _random_mask_observed(X, frac=0.1, seed=seed)
+    
     return mask
 
 
@@ -287,6 +436,7 @@ def _monte_carlo_validation(
     rank: int,
     max_iters: int,
     tol: float,
+    preprocessing_info: tuple,
     n_repeats: int = 100,
     mask_strategy: str = 'random',
     frac: float = 0.1,
@@ -300,13 +450,15 @@ def _monte_carlo_validation(
     Parameters
     ----------
     X : np.ndarray
-        Input array with np.nan for missing values
+        Input array with np.nan for missing values (preprocessed)
     rank : int
         Rank for SVD imputation
     max_iters : int
         Maximum iterations for imputation
     tol : float
         Convergence tolerance
+    preprocessing_info : tuple
+        Preprocessing parameters for postprocessing results
     n_repeats : int
         Number of Monte Carlo repeats
     mask_strategy : str
@@ -323,7 +475,7 @@ def _monte_carlo_validation(
     Returns
     -------
     dict
-        Dictionary with RMSE and MAE statistics
+        Dictionary with RMSE and MAE statistics and postprocessed raw_imputed
     """
     rng = np.random.default_rng(seed)
     rmse_list = []
@@ -331,7 +483,13 @@ def _monte_carlo_validation(
     imputed_list = []
 
     for i in range(n_repeats):
-        s = None if seed is None else int(rng.integers(1 << 30))
+        # Generate a different seed for each iteration
+        # If overall seed is None, each iteration gets None (true randomness)
+        # If overall seed is provided, each iteration gets a deterministic but different seed
+        if seed is None:
+            s = None  # Each iteration gets true randomness
+        else:
+            s = int(rng.integers(1 << 30))  # Each iteration gets a different deterministic seed
         
         # Create mask
         if mask_strategy == 'random':
@@ -354,7 +512,10 @@ def _monte_carlo_validation(
             max_iters=max_iters,
             tol=tol
         )
-        imputed_list.append(X_imputed)
+        
+        # Apply postprocessing to convert back to original scale
+        X_imputed_postprocessed = postprocess_after_svd(X_imputed, preprocessing_info)
+        imputed_list.append(X_imputed_postprocessed)
 
         # Compute error only on masked positions
         true_vals = X[masked_positions]
@@ -365,8 +526,8 @@ def _monte_carlo_validation(
 
     # Summarize
     def summarize(vals):
-        m = mean(vals)
-        s = stdev(vals) if len(vals) > 1 else 0.0
+        m = np.mean(vals)
+        s = np.std(vals, ddof=1) if len(vals) > 1 else 0.0  # ddof=1 for sample std dev
         se = s / np.sqrt(len(vals))
         lower = m - 1.96 * se
         upper = m + 1.96 * se
@@ -519,11 +680,11 @@ class Imputer:
         self.svd_components_ = None     # Dict with {'U': U, 's': s, 'Vt': Vt}
         
         if self.verbose:
-            print(f"Initialized imputer with data shape {self.shape_}")
+            logger.info(f"Initialized imputer with data shape {self.shape_}")
             n_missing = np.isnan(self.data_original_.values).sum()
             total_vals = np.prod(self.shape_)
             pct_missing = (n_missing / total_vals) * 100
-            print(f"Missing values: {n_missing}/{total_vals} ({pct_missing:.1f}%)") 
+            logger.info(f"Missing values: {n_missing}/{total_vals} ({pct_missing:.1f}%)") 
     
     def fit(self) -> 'Imputer':
         """
@@ -551,7 +712,7 @@ class Imputer:
         if self.rank == "auto":
             # Auto-optimize rank via cross-validation
             if self.verbose:
-                print("Auto-optimizing rank via cross-validation...")
+                logger.info("Auto-optimizing rank via cross-validation...")
             
             self.optimization_results_ = self.optimize_rank()
             self.rank_ = self.optimization_results_['optimal_rank']
@@ -559,15 +720,15 @@ class Imputer:
             if self.verbose:
                 score = self.optimization_results_['optimal_score']
                 converged = self.optimization_results_['convergence_info']['is_converged']
-                print(f"Optimized rank: {self.rank_} (CV score: {score:.4f})")
+                logger.info(f"Optimized rank: {self.rank_} (CV score: {score:.4f})")
                 if not converged:
-                    print("Warning: Optimization may not have converged to a clear minimum")
+                    logger.warning("Optimization may not have converged to a clear minimum")
         
         elif self.rank is None:
             # Variance-based estimation (default behavior)
             self.rank_ = estimate_rank(X_array, self.variance_threshold)
             if self.verbose:
-                print(f"Estimated rank: {self.rank_} "
+                logger.info(f"Estimated rank: {self.rank_} "
                       f"(variance threshold: {self.variance_threshold*100:.0f}%)")
         
         else:
@@ -576,18 +737,18 @@ class Imputer:
             # Check if requested rank is feasible
             check_sufficient_rank(self.data_original_, self.rank_)
             if self.verbose:
-                print(f"Using fixed rank: {self.rank_}")
+                logger.info(f"Using fixed rank: {self.rank_}")
         
         # Perform imputation to cache SVD components
         if self.verbose:
-            print(f"Fitting SVD imputer with rank={self.rank_}...")
+            logger.info(f"Fitting SVD imputer with rank={self.rank_}...")
         
         X_imputed, svd_components = self._fit_and_cache_svd(X_array)
         self.svd_components_ = svd_components
         
         self.is_fitted_ = True
         if self.verbose:
-            print("Fit completed. SVD components cached for reuse.")
+            logger.info("Fit completed. SVD components cached for reuse.")
         
         return self
     
@@ -704,8 +865,8 @@ class Imputer:
             raise ValueError(f"metric must be 'rmse' or 'mae', got '{metric}'")
         
         if self.verbose:
-            print(f"Optimizing rank in range [{min_rank}, {max_rank}] using {cv_folds}-fold CV")
-            print(f"Strategy: {mask_strategy}, Repeats per fold: {n_repeats_per_fold}")
+            logger.info(f"Optimizing rank in range [{min_rank}, {max_rank}] using {cv_folds}-fold CV")
+            logger.info(f"Strategy: {mask_strategy}, Repeats per fold: {n_repeats_per_fold}")
         
         # Initialize random number generator
         rng = np.random.default_rng(seed)
@@ -719,7 +880,7 @@ class Imputer:
         
         for rank in ranks_to_test:
             if self.verbose:
-                print(f"Testing rank {rank}...")
+                logger.debug(f"Testing rank {rank}...")
             
             fold_scores = []
             cv_details[rank] = []
@@ -734,6 +895,7 @@ class Imputer:
                     rank=rank,
                     max_iters=self.max_iters,
                     tol=self.tol,
+                    preprocessing_info=self.preprocessing_info_,
                     n_repeats=n_repeats_per_fold,
                     mask_strategy=mask_strategy,
                     frac=frac,
@@ -767,7 +929,7 @@ class Imputer:
             })
             
             if self.verbose:
-                print(f"  Rank {rank}: {metric.upper()}={mean_score:.4f} ± {std_score:.4f}")
+                logger.debug(f"  Rank {rank}: {metric.upper()}={mean_score:.4f} ± {std_score:.4f}")
         
         # Convert to DataFrame for easy analysis
         results_df = pd.DataFrame(rank_results)
@@ -799,12 +961,12 @@ class Imputer:
         }
         
         if self.verbose:
-            print(f"\nOptimization complete:")
-            print(f"  Optimal rank: {optimal_rank}")
-            print(f"  {metric.upper()}: {optimal_score:.4f}")
-            print(f"  Convergence: {'Yes' if convergence_info['is_converged'] else 'No'}")
+            logger.info(f"\nOptimization complete:")
+            logger.info(f"  Optimal rank: {optimal_rank}")
+            logger.info(f"  {metric.upper()}: {optimal_score:.4f}")
+            logger.info(f"  Convergence: {'Yes' if convergence_info['is_converged'] else 'No'}")
             if not convergence_info['is_converged']:
-                print(f"  Consider expanding rank range or increasing n_repeats_per_fold")
+                logger.warning(f"  Consider expanding rank range or increasing n_repeats_per_fold")
         
         return {
             'optimal_rank': int(optimal_rank),
@@ -852,7 +1014,7 @@ class Imputer:
     def estimate_uncertainty(
         self,
         n_repeats: int = 100,
-        mask_strategy: str = 'block',
+        mask_strategy: str = 'random',
         frac: float = 0.1,
         block_len: int = 5,
         n_blocks: int = 1,
@@ -908,8 +1070,8 @@ class Imputer:
         X_array = self.data_preprocessed_.values if isinstance(self.data_preprocessed_, pd.DataFrame) else self.data_preprocessed_
         
         if self.verbose:
-            print(f"Estimating uncertainty with {n_repeats} Monte Carlo repeats...")
-            print(f"Strategy: {mask_strategy}, Rank: {self.rank_}")
+            logger.info(f"Estimating uncertainty with {n_repeats} Monte Carlo repeats...")
+            logger.info(f"Strategy: {mask_strategy}, Rank: {self.rank_}")
         
         # Perform Monte Carlo validation
         results = _monte_carlo_validation(
@@ -917,6 +1079,7 @@ class Imputer:
             rank=self.rank_,
             max_iters=self.max_iters,
             tol=self.tol,
+            preprocessing_info=self.preprocessing_info_,
             n_repeats=n_repeats,
             mask_strategy=mask_strategy,
             frac=frac,
@@ -926,10 +1089,10 @@ class Imputer:
         )
         
         if self.verbose:
-            print(f"RMSE: {results['RMSE']['mean']:.4f} "
+            logger.info(f"RMSE: {results['RMSE']['mean']:.4f} "
                   f"(95% CI: {results['RMSE']['95%_CI'][0]:.4f} - "
                   f"{results['RMSE']['95%_CI'][1]:.4f})")
-            print(f"MAE:  {results['MAE']['mean']:.4f} "
+            logger.info(f"MAE:  {results['MAE']['mean']:.4f} "
                   f"(95% CI: {results['MAE']['95%_CI'][0]:.4f} - "
                   f"{results['MAE']['95%_CI'][1]:.4f})")
         
@@ -957,18 +1120,20 @@ class Imputer:
         # Use cached SVD components if available for faster imputation
         if self.svd_components_ is not None:
             if self.verbose:
-                print(f"Using cached SVD components for imputation...")
+                logger.debug(f"Using cached SVD components for imputation...")
             X_imputed = self._impute_with_cached_svd(X_array, self.preprocessing_info_)
         else:
             # Fallback to full imputation
             if self.verbose:
-                print(f"Imputing with rank={self.rank_}, max_iters={self.max_iters}, tol={self.tol}")
+                logger.info(f"Imputing with rank={self.rank_}, max_iters={self.max_iters}, tol={self.tol}")
             X_imputed = iterative_svd_impute(
                 X_array,
                 rank=self.rank_,
                 max_iters=self.max_iters,
                 tol=self.tol
             )
+            # Apply postprocessing to return data in original scale
+            X_imputed = postprocess_after_svd(X_imputed, self.preprocessing_info_)
         
         # Convert back to original DataFrame format
         df_imputed = pd.DataFrame(
@@ -979,7 +1144,7 @@ class Imputer:
         
         if self.verbose:
             n_missing = np.isnan(self.data_original_.values).sum()
-            print(f"Imputed {n_missing} missing values")
+            logger.info(f"Imputed {n_missing} missing values")
         
         return df_imputed
     
@@ -1078,7 +1243,7 @@ class Imputer:
         )
         
         if self.verbose:
-            print(f"Projected data onto rank-{self.rank_} SVD subspace")
+            logger.debug(f"Projected data onto rank-{self.rank_} SVD subspace")
         
         return df_projected
     
@@ -1120,7 +1285,7 @@ class Imputer:
         if new_data is None:
             new_data = self.data_original_.copy()
             if self.verbose:
-                print("Using original fitted data for reconstruction")
+                logger.debug("Using original fitted data for reconstruction")
         
         # Validate new data structure matches original  
         new_data_validated = validate_dataframe(new_data)
@@ -1165,7 +1330,7 @@ class Imputer:
         )
         
         if self.verbose:
-            print(f"Reconstructed data using rank-{self.rank_} SVD approximation")
+            logger.debug(f"Reconstructed data using rank-{self.rank_} SVD approximation")
         
         return df_reconstructed
     
@@ -1238,7 +1403,7 @@ class Imputer:
         if new_data is None:
             original_data = self.data_original_.copy()
             if self.verbose:
-                print("Calculating residuals for original fitted data")
+                logger.debug("Calculating residuals for original fitted data")
         else:
             # Validate new data structure matches original
             original_data = validate_dataframe(new_data)
@@ -1250,7 +1415,7 @@ class Imputer:
                 )
                 
             if self.verbose:
-                print("Calculating residuals for new data")
+                logger.debug("Calculating residuals for new data")
         
         # Get reconstruction of the data
         reconstructed_data = self.reconstruct_data(original_data)
@@ -1317,11 +1482,11 @@ class Imputer:
         }
         
         if self.verbose:
-            print(f"Residual statistics (n={len(residuals_obs)} observed values):")
-            print(f"  RMSE: {rmse:.6f}")
-            print(f"  MAE:  {mae:.6f}")
-            print(f"  Bias: {bias:.6f}")
-            print(f"  R²:   {r_squared:.6f}")
+            logger.info(f"Residual statistics (n={len(residuals_obs)} observed values):")
+            logger.info(f"  RMSE: {rmse:.6f}")
+            logger.info(f"  MAE:  {mae:.6f}")
+            logger.info(f"  Bias: {bias:.6f}")
+            logger.info(f"  R²:   {r_squared:.6f}")
         
         return residuals_df, stats_dict
     
@@ -1539,9 +1704,9 @@ class Imputer:
         corr_matrix = df_original.corr()
         
         if self.verbose:
-            print("Conditioning imputed values on observations...")
-            print(f"  Temporal range: {temporal_range} days")
-            print(f"  Spatial weight: {spatial_weight}")
+            logger.info("Conditioning imputed values on observations...")
+            logger.info(f"  Temporal range: {temporal_range} days")
+            logger.info(f"  Spatial weight: {spatial_weight}")
         
         # Process each column
         for col in df_original.columns:
@@ -1623,7 +1788,7 @@ class Imputer:
         
         if self.verbose:
             avg_change = (df_conditioned - df_imputed).abs().mean().mean()
-            print(f"  Average adjustment: {avg_change:.4f}")
+            logger.info(f"  Average adjustment: {avg_change:.4f}")
         
         # If uncertainty provided, reduce it based on conditioning
         if uncertainty_dict is not None:
@@ -1696,7 +1861,7 @@ class Imputer:
                 conditioned_unc['upper'] = df_conditioned + ci_half_width
         
         if self.verbose:
-            print(f"  Uncertainty reduced by Kriging conditioning")
+            logger.info(f"  Uncertainty reduced by Kriging conditioning")
         
         return conditioned_unc
     
