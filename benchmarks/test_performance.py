@@ -5,6 +5,7 @@ Performance benchmarks for SVD Imputer
 import numpy as np
 import pandas as pd
 import pytest
+
 from svd_imputer import Imputer
 
 
@@ -143,10 +144,7 @@ class TestPerformanceBenchmarks:
         """Benchmark different fixed ranks."""
         dates = pd.date_range("2020-01-01", periods=300, freq="D")
         df = pd.DataFrame(
-            {
-                f"col_{i}": np.random.randn(300) + np.sin(np.arange(300) * 2 * np.pi / (10 + i))
-                for i in range(6)
-            },
+            {f"col_{i}": np.random.randn(300) + np.sin(np.arange(300) * 2 * np.pi / (10 + i)) for i in range(6)},
             index=dates,
         )
 

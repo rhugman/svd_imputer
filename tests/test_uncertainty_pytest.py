@@ -5,6 +5,7 @@ Pytest-compatible uncertainty estimation tests
 import numpy as np
 import pandas as pd
 import pytest
+
 from svd_imputer import Imputer
 
 
@@ -105,7 +106,7 @@ class TestUncertaintyEstimation:
         np.random.seed(42)  # For reproducibility
         dates = pd.date_range("2020-01-01", periods=100, freq="D")
         t = np.arange(100)
-        
+
         df = pd.DataFrame(
             {
                 "A": np.sin(2 * np.pi * t / 20) + 0.1 * np.random.randn(100),
@@ -135,16 +136,16 @@ class TestUncertaintyEstimation:
     def test_uncertainty_with_different_missing_patterns(self):
         """Test uncertainty with different missing data patterns."""
         dates = pd.date_range("2020-01-01", periods=50, freq="D")
-        
+
         patterns = [
-            "random",      # Random missing
-            "block",       # Consecutive missing blocks
-            "periodic",    # Periodic missing pattern
+            "random",  # Random missing
+            "block",  # Consecutive missing blocks
+            "periodic",  # Periodic missing pattern
         ]
-        
+
         for pattern in patterns:
             df = pd.DataFrame({"A": np.random.randn(50), "B": np.random.randn(50)}, index=dates)
-            
+
             if pattern == "random":
                 # Random 20% missing
                 mask = np.random.random(df.shape) < 0.2
@@ -203,7 +204,7 @@ class TestUncertaintyWithFixtures:
     def test_uncertainty_vs_missing_fraction(self, uncertainty_test_data, missing_fraction):
         """Test how uncertainty changes with different amounts of missing data."""
         df = uncertainty_test_data.copy()
-        
+
         # Create random missing pattern
         mask = np.random.random(df.shape) < missing_fraction
         df = df.mask(mask)
@@ -214,7 +215,7 @@ class TestUncertaintyWithFixtures:
 
             assert df_imputed.isna().sum().sum() == 0
             assert uncertainty["rmse"] > 0
-            
+
             # Generally, more missing data should lead to higher uncertainty
             # (though this is not always guaranteed due to randomness)
             assert uncertainty["rmse"] < 10.0  # Sanity check
@@ -229,32 +230,35 @@ class TestUncertaintyIntegration:
         # Simulate sensor data with daily patterns
         dates = pd.date_range("2020-01-01", periods=200, freq="H")
         hours = dates.hour
-        
-        df = pd.DataFrame({
-            "temperature": 20 + 10 * np.sin(2 * np.pi * hours / 24) + np.random.randn(200) * 2,
-            "humidity": 50 + 20 * np.cos(2 * np.pi * hours / 24) + np.random.randn(200) * 5,
-            "pressure": 1013 + np.random.randn(200) * 3,
-        }, index=dates)
-        
+
+        df = pd.DataFrame(
+            {
+                "temperature": 20 + 10 * np.sin(2 * np.pi * hours / 24) + np.random.randn(200) * 2,
+                "humidity": 50 + 20 * np.cos(2 * np.pi * hours / 24) + np.random.randn(200) * 5,
+                "pressure": 1013 + np.random.randn(200) * 3,
+            },
+            index=dates,
+        )
+
         # Simulate realistic missing patterns (sensor outages)
         # Random missing
         mask1 = np.random.random((200, 3)) < 0.05
         # Sensor outage blocks
         df.iloc[50:55, 0] = np.nan  # Temperature sensor out
         df.iloc[100:110, 1] = np.nan  # Humidity sensor out
-        
+
         df = df.mask(mask1)
-        
+
         imputer = Imputer(data=df, verbose=False)
         df_imputed, uncertainty = imputer.fit_transform(return_uncertainty=True, n_repeats=30)
-        
+
         # Validate results
         assert df_imputed.isna().sum().sum() == 0
         assert uncertainty["method"] == "monte_carlo"
-        
+
         # Check that daily patterns are preserved
         temp_correlation = np.corrcoef(
-            df_imputed["temperature"], 
-            20 + 10 * np.sin(2 * np.pi * df_imputed.index.hour / 24)
+            df_imputed["temperature"],
+            20 + 10 * np.sin(2 * np.pi * df_imputed.index.hour / 24),
         )[0, 1]
         assert temp_correlation > 0.7, "Daily temperature pattern not preserved"

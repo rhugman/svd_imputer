@@ -5,6 +5,7 @@ Pytest-compatible test suite for SVD Imputer package
 import numpy as np
 import pandas as pd
 import pytest
+
 from svd_imputer import Imputer
 
 
@@ -29,7 +30,12 @@ class TestSVDImputerBasic:
         """Test automatic rank estimation."""
         dates = pd.date_range("2020-01-01", periods=50, freq="D")
         df = pd.DataFrame(
-            {"A": np.random.randn(50), "B": np.random.randn(50), "C": np.random.randn(50)}, index=dates
+            {
+                "A": np.random.randn(50),
+                "B": np.random.randn(50),
+                "C": np.random.randn(50),
+            },
+            index=dates,
         )
 
         df.iloc[::5, :] = np.nan
