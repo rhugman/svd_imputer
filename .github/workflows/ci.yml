@@ -108,11 +108,6 @@ jobs:
           --cov-fail-under=80 \
           --durations=10
           
-    - name: Run legacy tests
-      run: |
-        python tests/test_package.py
-        python tests/test_uncertainty.py
-        
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
       uses: codecov/codecov-action@v3
