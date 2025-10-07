@@ -107,6 +107,7 @@ jobs:
           --cov-report=term-missing \
           --cov-fail-under=80 \
           --durations=10
+      shell: bash
           
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
