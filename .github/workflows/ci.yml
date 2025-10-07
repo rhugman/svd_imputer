@@ -1,0 +1,263 @@
+name: Comprehensive Test Suite
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_call:  # Allow calling from other workflows
+  workflow_dispatch:  # Allow manual triggering
+  schedule:
+    # Run tests weekly on Sundays at 02:00 UTC
+    - cron: '0 2 * * 0'
+
+env:
+  FORCE_COLOR: 1
+  PIP_DISABLE_PIP_VERSION_CHECK: 1
+
+jobs:
+  # Job 1: Code Quality Checks
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install flake8 black isort bandit mypy
+        pip install -e .
+        if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+        
+    - name: Check code formatting with Black
+      run: black --check --diff svd_imputer/ tests/
+      
+    - name: Check import sorting with isort
+      run: isort --check-only --diff svd_imputer/ tests/
+      
+    - name: Lint with flake8
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 svd_imputer --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Treat all other issues as warnings
+        flake8 svd_imputer --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        
+    - name: Type checking with mypy
+      run: mypy svd_imputer --ignore-missing-imports --no-strict-optional
+      continue-on-error: true
+      
+    - name: Security check with bandit
+      run: bandit -r svd_imputer -ll
+      continue-on-error: true
+
+  # Job 2: Test Matrix
+  test-matrix:
+    name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    needs: code-quality
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        exclude:
+          # Reduce job count by excluding some combinations
+          - os: windows-latest
+            python-version: '3.8'
+          - os: macos-latest  
+            python-version: '3.8'
+            
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        
+    - name: Install system dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+        
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install -e .
+        pip install pytest pytest-cov pytest-xdist pytest-mock
+        if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+      shell: bash
+      
+    - name: Run tests with pytest
+      run: |
+        pytest tests/ -v \
+          --cov=svd_imputer \
+          --cov-report=xml \
+          --cov-report=term-missing \
+          --cov-fail-under=80 \
+          --durations=10
+      shell: bash
+          
+    - name: Upload coverage to Codecov
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false
+        verbose: true
+
+  # Job 3: Performance Benchmarks
+  performance:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    needs: code-quality
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+        pip install pytest-benchmark memory-profiler
+        
+    - name: Run performance benchmarks
+      run: |
+        python -m pytest benchmarks/ -v --benchmark-only --benchmark-json=benchmark.json
+      continue-on-error: true
+      
+    - name: Store benchmark result
+      uses: benchmark-action/github-action-benchmark@v1
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      with:
+        tool: 'pytest'
+        output-file-path: benchmark.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true
+        alert-threshold: '200%'
+        comment-on-alert: true
+
+  # Job 4: Documentation Build
+  docs:
+    name: Documentation Build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+        pip install sphinx sphinx-rtd-theme nbsphinx
+        
+    - name: Build documentation
+      run: |
+        cd docs && make html
+      continue-on-error: true
+      
+    - name: Upload documentation artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: documentation
+        path: docs/_build/html/
+
+  # Job 5: Package Build Test
+  package:
+    name: Package Build Test
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install build tools
+      run: |
+        python -m pip install --upgrade pip build twine
+        
+    - name: Build package
+      run: |
+        python -m build
+        
+    - name: Check package with twine
+      run: |
+        python -m twine check dist/*
+        
+    - name: Upload package artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: packages
+        path: dist/
+
+  # Job 6: Dependency Security Check
+  security:
+    name: Dependency Security Scan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install safety pip-audit
+        pip install -e .
+        
+    - name: Run safety check
+      run: safety check --json
+      continue-on-error: true
+      
+    - name: Run pip-audit
+      run: pip-audit --format=json
+      continue-on-error: true
+
+  # Summary job that depends on all others
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    needs: [code-quality, test-matrix, performance, docs, package, security]
+    if: always()
+    steps:
+    - name: Check CI status
+      run: |
+        if [[ "${{ needs.code-quality.result }}" == "success" && 
+              "${{ needs.test-matrix.result }}" == "success" && 
+              "${{ needs.package.result }}" == "success" ]]; then
+          echo "✅ All critical CI jobs passed!"
+          exit 0
+        else
+          echo "❌ Some critical CI jobs failed"
+          exit 1
+        fi

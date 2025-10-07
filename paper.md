@@ -20,11 +20,11 @@ bibliography: paper.bib
 
 # Summary
 
-Time series data from environmental monitoring networks often contain gaps due to sensor failures, maintenance periods, or data transmission issues. Filling these gaps accurately is crucial for analyses ranging from trend detection to hydrological modeling. `svd_imputer` is a Python package that leverages Singular Value Decomposition (SVD) to impute missing values in multivariate time series by exploiting spatial and temporal correlations across monitoring sites. The package uniquely provides three methods for uncertainty quantification—Monte Carlo validation, Bootstrap resampling, and a Hybrid approach—enabling users to assess confidence in imputed values, which is critical for downstream decision-making.
+Time series data from environmental monitoring networks often contain gaps due to sensor failures, maintenance periods, or data transmission issues. Filling these gaps accurately can be crucial for analyses ranging from trend detection, interpolation between sites or as inputs to numerical models. `svd_imputer` is a Python package that leverages Singular Value Decomposition (SVD) to impute missing values in multivariate time series by exploiting spatial and temporal correlations across monitoring sites. The package uniquely provides three methods for uncertainty quantification—Monte Carlo validation, Bootstrap resampling, and a Hybrid approach—enabling users to assess confidence in imputed values, which can be propagated to assessing error or uncertainty of downstream analyses.
 
 # Statement of Need
 
-Environmental monitoring networks, such as groundwater level stations or weather monitoring arrays, generate multivariate time series that are spatially correlated. Traditional univariate imputation methods (e.g., linear interpolation, mean substitution) ignore these cross-series relationships and provide no uncertainty estimates. While sophisticated machine learning approaches exist, they often lack interpretability and require extensive tuning.
+Environmental monitoring networks, such as groundwater level stations or weather monitoring arrays, generate multivariate time series that are often spatially correlated. Traditional univariate imputation methods (e.g., linear interpolation, mean substitution) ignore these cross-series relationships and provide weak estimates of imputation error or uncertainty. While sophisticated machine learning approaches exist, they require large datasets for training which in practice are often not available.
 
 Matrix completion methods based on low-rank approximations offer a principled middle ground: they exploit correlations between series while remaining computationally efficient and theoretically grounded. However, existing Python implementations either lack robust handling of time series constraints (e.g., datetime indexing, temporal ordering) or provide no framework for uncertainty quantification.
 
@@ -73,7 +73,7 @@ This method assesses global imputation accuracy:
 4. Repeat $N$ times to generate error distributions
 5. Apply constant uncertainty band: $\text{CI}_{95\%} = \hat{X}_{ij} \pm 1.96 \times \text{RMSE}$
 
-This approach is computationally efficient and provides realistic error estimates based on validation, but assumes constant uncertainty across all imputed values.
+This approach is computationally efficient and provides conservative error estimates based on validation, but assumes constant uncertainty across all imputed values.
 
 ### Bootstrap Resampling
 
@@ -96,7 +96,7 @@ The hybrid method combines both techniques:
    $$\text{CI}_{\text{hybrid}} = \hat{X}_{ij} \pm \text{scale\_factor} \times \text{std}_{\text{bootstrap}}$$
    where the scale factor adjusts Bootstrap standard deviations to match Monte Carlo validation errors
 
-This provides well-calibrated, point-wise confidence intervals that balance global accuracy with local uncertainty patterns.
+This provides calibrated, point-wise confidence intervals that balance global accuracy with local uncertainty patterns.
 
 ### Proximity-Based Adjustment
 
