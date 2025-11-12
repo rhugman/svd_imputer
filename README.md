@@ -1,6 +1,12 @@
 # SVD Time Series Imputer
 
+[![PyPI version](https://badge.fury.io/py/svd-imputer.svg)](https://badge.fury.io/py/svd-imputer)
+[![Python versions](https://img.shields.io/pypi/pyversions/svd-imputer.svg)](https://pypi.org/project/svd-imputer/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A Python package for time series imputation using Singular Value Decomposition (SVD) with automatic rank estimation and uncertainty quantification.
+
+**📦 Now available on PyPI**: `pip install svd-imputer`
 
 ## Table of Contents
 - [Installation](#installation)  
@@ -14,12 +20,19 @@ A Python package for time series imputation using SVD with automatic rank estima
 
 ## Installation
 
-Install from source (development version):
+**PyPI (Recommended)**:
 ```bash
+pip install svd-imputer
+```
+
+**From Source** (development version):
+```bash
+git clone https://github.com/rhugman/svd_imputer.git
+cd svd_imputer
 pip install -e .
 ```
 
-Install with development dependencies:
+**With Development Dependencies**:
 ```bash
 pip install -e ".[dev]"
 ```
@@ -122,9 +135,11 @@ The algorithm performs iterative SVD imputation with automatic rank estimation:
 - **Recommended Scale**: Efficient for datasets up to ~10,000 × 100 dimensions
 - **Optimization**: SVD components are cached for efficient reuse across operations
 
-## Development Status
+## Package Status
 
-This package is currently very much in **Beta** User beware!
+**Current Status**: **Published on PyPI** 🎉
+
+This package is currently in **Beta** - the core functionality is stable and tested (86 tests passing), but the API may evolve. Suitable for research and development use.
 
 ## Disclaimer
 
@@ -138,6 +153,12 @@ MIT License
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+## Links
+
+- **PyPI Package**: https://pypi.org/project/svd-imputer/
+- **Source Code**: https://github.com/rhugman/svd_imputer
+- **Issues**: https://github.com/rhugman/svd_imputer/issues
+
 ## Citation
 
 If you use this package in your research, please cite:
@@ -147,6 +168,7 @@ If you use this package in your research, please cite:
   title={SVD Time Series Imputer: A Python Package for Missing Data Imputation},
   author={Rui Hugman},
   year={2025},
-  url={https://github.com/rhugman/svd_imputer}
+  url={https://github.com/rhugman/svd_imputer},
+  note={Available on PyPI: https://pypi.org/project/svd-imputer/}
 }
 ```
