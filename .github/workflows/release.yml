@@ -288,7 +288,8 @@ jobs:
   test-test-pypi:
     name: Test Installation from Test PyPI
     runs-on: ubuntu-latest
-    needs: publish-test-pypi
+    needs: [validate-release, publish-test-pypi]
+    if: always() && needs.publish-test-pypi.result != 'failure'
     steps:
     - name: Set up Python 3.11
       uses: actions/setup-python@v4
@@ -300,7 +301,9 @@ jobs:
       
     - name: Install from Test PyPI
       run: |
-        pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ svd-imputer==${{ needs.validate-release.outputs.version }}
+        VERSION="${{ needs.validate-release.outputs.version }}"
+        echo "Attempting to install svd-imputer==$VERSION from Test PyPI"
+        pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ svd-imputer==$VERSION
         
     - name: Test Test PyPI installation
       run: |
