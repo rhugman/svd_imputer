@@ -80,13 +80,13 @@ jobs:
         if [ ! -f CHANGELOG.md ]; then
           echo "Warning: CHANGELOG.md not found"
         else
-          echo "✅ Changelog found"
+          echo "SUCCESS: Changelog found"
         fi
         
     - name: Run basic tests
       run: |
         pip install -e .
-        python -c "import svd_imputer; print('✅ Package imports successfully')"
+        python -c "import svd_imputer; print('SUCCESS: Package imports successfully')"
 
   # Job 2: Run Full Test Suite
   test-before-release:
@@ -182,7 +182,7 @@ jobs:
         
         # Test basic import
         from svd_imputer import Imputer
-        print('✅ Imputer class imported successfully')
+        print('SUCCESS: Imputer class imported successfully')
         
         # Test basic functionality (without actually running imputation to keep it fast)
         import pandas as pd
@@ -190,7 +190,7 @@ jobs:
         dates = pd.date_range('2020-01-01', periods=10, freq='D')
         df = pd.DataFrame({'A': range(10)}, index=dates)
         imputer = Imputer(data=df, verbose=False)
-        print('✅ Imputer instantiated successfully')
+        print('SUCCESS: Imputer instantiated successfully')
         "
 
   # Job 5: Create GitHub Release
@@ -247,79 +247,26 @@ jobs:
         cat release_notes.md
         
     - name: Create GitHub Release
-      uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref_name }}
-        release_name: Release v${{ needs.validate-release.outputs.version }}
-        body_path: release_notes.md
-        draft: false
-        prerelease: ${{ needs.validate-release.outputs.is_prerelease }}
-        
-    - name: Upload release assets
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: dist/
-        asset_name: distribution-packages
-        asset_content_type: application/zip
-
-  # Job 6: Publish to Test PyPI
-  publish-test-pypi:
-    name: Publish to Test PyPI
-    runs-on: ubuntu-latest
-    needs: [validate-release, test-installation]
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
-    steps:
-    - name: Download build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: dist-packages
-        path: dist/
-        
-    - name: Publish to Test PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-        repository-url: https://test.pypi.org/legacy/
-        skip-existing: true
-        verbose: true
-
-  # Job 7: Test Test PyPI Installation
-  test-test-pypi:
-    name: Test Installation from Test PyPI
-    runs-on: ubuntu-latest
-    needs: publish-test-pypi
-    steps:
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
-    - name: Wait for Test PyPI propagation
-      run: sleep 60
-      
-    - name: Install from Test PyPI
       run: |
-        pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ svd-imputer==${{ needs.validate-release.outputs.version }}
+        PRERELEASE_FLAG=""
+        if [ "${{ needs.validate-release.outputs.is_prerelease }}" = "true" ]; then
+          PRERELEASE_FLAG="--prerelease"
+        fi
         
-    - name: Test Test PyPI installation
-      run: |
-        python -c "
-        import svd_imputer
-        print(f'Successfully installed from Test PyPI: {svd_imputer.__version__}')
-        from svd_imputer import Imputer
-        print('✅ Test PyPI installation successful')
-        "
+        # Create the release
+        gh release create v${{ needs.validate-release.outputs.version }} \
+          --title "Release v${{ needs.validate-release.outputs.version }}" \
+          --notes-file release_notes.md \
+          $PRERELEASE_FLAG \
+          dist/*
 
-  # Job 8: Publish to PyPI (Production)
+  # Job 6: Publish to PyPI (Production)
   publish-pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    needs: [validate-release, test-test-pypi, create-github-release]
+    needs: [validate-release, test-installation, create-github-release]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && needs.validate-release.outputs.is_prerelease == 'false' && !inputs.dry_run
     steps:
     - name: Download build artifacts
@@ -332,14 +279,18 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         password: ${{ secrets.PYPI_API_TOKEN }}
+        skip-existing: true
         verbose: true
 
-  # Job 9: Post-Release Actions
+  # Job 7: Post-Release Actions
   post-release:
     name: Post-Release Actions
     runs-on: ubuntu-latest
     needs: [validate-release, publish-pypi]
     if: always() && (needs.publish-pypi.result == 'success' || needs.publish-pypi.result == 'skipped')
+    permissions:
+      contents: write
+      issues: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -353,41 +304,10 @@ jobs:
         echo "Released version ${{ needs.validate-release.outputs.version }}"
         echo "Ready for next development cycle"
         
-    - name: Create post-release issue
-      if: needs.publish-pypi.result == 'success'
-      uses: actions/github-script@v6
-      with:
-        script: |
-          github.rest.issues.create({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            title: `Post-release tasks for v${{ needs.validate-release.outputs.version }}`,
-            body: `
-            ## 🎉 Release v${{ needs.validate-release.outputs.version }} Published Successfully!
-            
-            ### Completed:
-            - ✅ Built and tested packages
-            - ✅ Published to PyPI
-            - ✅ Created GitHub release
-            
-            ### Post-release tasks:
-            - [ ] Update documentation with new version
-            - [ ] Announce release on social media/blog
-            - [ ] Update any dependent projects
-            - [ ] Plan next version features
-            - [ ] Close milestone if applicable
-            
-            ### Links:
-            - [PyPI Release](https://pypi.org/project/svd-imputer/${{ needs.validate-release.outputs.version }}/)
-            - [GitHub Release](https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate-release.outputs.version }})
-            
-            This issue was automatically created by the release workflow.
-            `,
-            labels: ['release', 'automated']
-          })
-          
-    - name: Send release notification
+    - name: Release Success Notification
       if: needs.publish-pypi.result == 'success'
       run: |
         echo "🎉 Successfully released v${{ needs.validate-release.outputs.version }} to PyPI!"
         echo "Package is now available: pip install svd-imputer==${{ needs.validate-release.outputs.version }}"
+        echo "PyPI: https://pypi.org/project/svd-imputer/${{ needs.validate-release.outputs.version }}/"
+        echo "GitHub: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate-release.outputs.version }}"
