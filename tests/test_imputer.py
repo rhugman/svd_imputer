@@ -383,43 +383,43 @@ class TestImputerAdvanced:
         assert residuals_only.shape == advanced_data.shape
         assert residuals_only.index.equals(advanced_data.index)
         assert residuals_only.columns.equals(advanced_data.columns)
-        
+
         # Check that residuals are NaN where original data was missing
         assert pd.isna(residuals_only.iloc[5, 0])  # Should be NaN where original was NaN
         assert pd.isna(residuals_only.iloc[10, 1])
         assert pd.isna(residuals_only.iloc[15, 2])
-        
+
         # Check that residuals exist where original data was observed
         assert not pd.isna(residuals_only.iloc[0, 0])  # Should have residual where original had data
 
         # Test with stats (return_stats=True, default)
         residuals, stats = imputer.calculate_reconstruction_residuals(return_stats=True)
-        
+
         # Check residuals DataFrame
         assert isinstance(residuals, pd.DataFrame)
         assert residuals.shape == advanced_data.shape
-        
+
         # Check stats dictionary
         assert isinstance(stats, dict)
-        required_keys = ['rmse', 'mae', 'bias', 'r_squared', 'residual_stats', 'n_observed', 'rank_used']
+        required_keys = ["rmse", "mae", "bias", "r_squared", "residual_stats", "n_observed", "rank_used"]
         for key in required_keys:
             assert key in stats, f"Missing required key: {key}"
-        
+
         # Check that stats are reasonable values
-        assert isinstance(stats['rmse'], (int, float)) and stats['rmse'] >= 0
-        assert isinstance(stats['mae'], (int, float)) and stats['mae'] >= 0
-        assert isinstance(stats['bias'], (int, float))
-        assert isinstance(stats['r_squared'], (int, float)) and 0 <= stats['r_squared'] <= 1
-        assert isinstance(stats['n_observed'], int) and stats['n_observed'] > 0
-        assert stats['rank_used'] == 2
-        
+        assert isinstance(stats["rmse"], (int, float)) and stats["rmse"] >= 0
+        assert isinstance(stats["mae"], (int, float)) and stats["mae"] >= 0
+        assert isinstance(stats["bias"], (int, float))
+        assert isinstance(stats["r_squared"], (int, float)) and 0 <= stats["r_squared"] <= 1
+        assert isinstance(stats["n_observed"], int) and stats["n_observed"] > 0
+        assert stats["rank_used"] == 2
+
         # Check residual_stats structure
-        assert isinstance(stats['residual_stats'], dict)
+        assert isinstance(stats["residual_stats"], dict)
         for col in advanced_data.columns:
-            assert col in stats['residual_stats']
-            col_stats = stats['residual_stats'][col]
+            assert col in stats["residual_stats"]
+            col_stats = stats["residual_stats"][col]
             assert isinstance(col_stats, dict)
-            col_required_keys = ['mean', 'std', 'min', 'max', 'n_observed', 'rmse', 'mae']
+            col_required_keys = ["mean", "std", "min", "max", "n_observed", "rmse", "mae"]
             for key in col_required_keys:
                 assert key in col_stats, f"Missing key {key} in column {col} stats"
 
@@ -428,30 +428,30 @@ class TestImputerAdvanced:
         # Train on original data
         imputer = Imputer(data=advanced_data, rank=2, verbose=False)
         imputer.fit()
-        
+
         # Create new test data with same structure
         dates_new = pd.date_range("2020-02-01", periods=20, freq="D")
         new_data = pd.DataFrame(
             {
-                'A': np.sin(np.arange(20) * 0.3) + np.random.randn(20) * 0.1,
-                'B': np.cos(np.arange(20) * 0.3) + np.random.randn(20) * 0.1,
-                'C': np.arange(20) * 0.15 + np.random.randn(20) * 0.05,
+                "A": np.sin(np.arange(20) * 0.3) + np.random.randn(20) * 0.1,
+                "B": np.cos(np.arange(20) * 0.3) + np.random.randn(20) * 0.1,
+                "C": np.arange(20) * 0.15 + np.random.randn(20) * 0.05,
             },
-            index=dates_new
+            index=dates_new,
         )
-        
+
         # Add some missing values to new data
         new_data.iloc[3, 0] = np.nan
         new_data.iloc[8, 1] = np.nan
-        
+
         # Test residuals calculation on new data
         residuals, stats = imputer.calculate_reconstruction_residuals(new_data, return_stats=True)
-        
+
         assert isinstance(residuals, pd.DataFrame)
         assert residuals.shape == new_data.shape
         assert isinstance(stats, dict)
-        assert stats['n_observed'] > 0
-        
+        assert stats["n_observed"] > 0
+
         # Check that residuals are NaN where new data was missing
         assert pd.isna(residuals.iloc[3, 0])
         assert pd.isna(residuals.iloc[8, 1])
@@ -459,21 +459,18 @@ class TestImputerAdvanced:
     def test_calculate_reconstruction_residuals_errors(self, advanced_data):
         """Test error conditions for calculate_reconstruction_residuals."""
         imputer = Imputer(data=advanced_data, rank=2, verbose=False)
-        
+
         # Test without fitting first
         with pytest.raises(RuntimeError, match="Imputer must be fitted before calculating residuals"):
             imputer.calculate_reconstruction_residuals()
-        
+
         # Fit the imputer
         imputer.fit()
-        
+
         # Test with mismatched columns
         dates_new = pd.date_range("2020-02-01", periods=10, freq="D")
-        wrong_columns_data = pd.DataFrame(
-            {'X': np.random.randn(10), 'Y': np.random.randn(10)},
-            index=dates_new
-        )
-        
+        wrong_columns_data = pd.DataFrame({"X": np.random.randn(10), "Y": np.random.randn(10)}, index=dates_new)
+
         with pytest.raises(ValueError, match="New data columns .* don't match original columns"):
             imputer.calculate_reconstruction_residuals(wrong_columns_data)
 

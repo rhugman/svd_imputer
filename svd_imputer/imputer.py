@@ -72,7 +72,7 @@ def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95, preprocessed=
     if not preprocessed:
         X_temp, _ = preprocess_for_svd(X)
     else:
-        X_temp = X.copy() #already standardized?
+        X_temp = X.copy()  # already standardized?
         # Fill NaNs with column means for SVD
         inds = np.where(np.isnan(X_temp))
         X_temp[inds] = 0.0
@@ -180,7 +180,7 @@ def iterative_svd_impute(
     # Validate rank
     n_rows, n_cols = X.shape
     max_possible_rank = min(n_rows, n_cols)
-    
+
     if rank > max_possible_rank:
         raise ValueError(f"rank={rank} exceeds maximum possible rank {max_possible_rank} " f"for matrix with shape {X.shape}")
     # Store missing positions before preprocessing
@@ -522,12 +522,11 @@ def _monte_carlo_validation(
             raise ValueError("There are rows that are entirely NaN after masking. Adjust masking parameters.")
 
         _rank = None
-        if isinstance(rank,int):
+        if isinstance(rank, int):
             _rank = rank
-        elif isinstance(rank,str) and rank == 'auto':
-            warnings.warn("rank='auto' recalculating rank for each Monte Carlo iteration.",
-                          RuntimeWarning)
-            _rank = estimate_rank(X_with_nans, variance_threshold=variance_threshold,preprocessed=True)
+        elif isinstance(rank, str) and rank == "auto":
+            warnings.warn("rank='auto' recalculating rank for each Monte Carlo iteration.", RuntimeWarning)
+            _rank = estimate_rank(X_with_nans, variance_threshold=variance_threshold, preprocessed=True)
             assert _rank is not None
         else:
             raise ValueError(f"Unsupported rank type: {type(rank)}")
