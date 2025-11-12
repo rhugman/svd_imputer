@@ -67,7 +67,6 @@ clean: ## Clean build artifacts
 	rm -rf htmlcov/
 	rm -rf .pytest_cache/
 	rm -rf .mypy_cache/
-	rm -rf .tox/
 	find . -name "*.pyc" -delete
 	find . -name "__pycache__" -delete
 
@@ -88,12 +87,6 @@ version: ## Show current version
 
 pre-commit: ## Run pre-commit hooks on all files
 	pre-commit run --all-files
-
-tox: ## Run tox tests
-	tox
-
-tox-parallel: ## Run tox tests in parallel
-	tox -p
 
 setup-dev: dev-install ## Complete development setup
 	@echo "Development setup complete!"

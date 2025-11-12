@@ -31,5 +31,4 @@ twine>=4.0.0
 wheel>=0.40.0
 
 # Additional utilities
-tox>=4.0.0
 pre-commit>=3.0.0
