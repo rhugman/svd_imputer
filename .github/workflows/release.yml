@@ -262,68 +262,11 @@ jobs:
           $PRERELEASE_FLAG \
           dist/*
 
-  # Job 6: Publish to Test PyPI
-  publish-test-pypi:
-    name: Publish to Test PyPI
-    runs-on: ubuntu-latest
-    needs: [validate-release, test-installation]
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
-    steps:
-    - name: Download build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: dist-packages
-        path: dist/
-        
-    - name: Publish to Test PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      continue-on-error: true  # Don't fail if Test PyPI token is missing
-      with:
-        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-        repository-url: https://test.pypi.org/legacy/
-        skip-existing: true
-        verbose: true
-
-  # Job 7: Test Test PyPI Installation
-  test-test-pypi:
-    name: Test Installation from Test PyPI
-    runs-on: ubuntu-latest
-    needs: [validate-release, publish-test-pypi]
-    if: always() && needs.publish-test-pypi.result == 'success'
-    steps:
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
-    - name: Wait for Test PyPI propagation
-      run: sleep 60
-      
-    - name: Install from Test PyPI
-      run: |
-        VERSION="${{ needs.validate-release.outputs.version }}"
-        echo "Attempting to install svd-imputer==$VERSION from Test PyPI"
-        
-        # Try to install the specific version, but fall back to latest if not available
-        if ! pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ svd-imputer==$VERSION; then
-          echo "Version $VERSION not found on Test PyPI, trying to install latest available version"
-          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ svd-imputer
-        fi
-        
-    - name: Test Test PyPI installation
-      run: |
-        python -c "
-        import svd_imputer
-        print(f'Successfully installed from Test PyPI: {svd_imputer.__version__}')
-        from svd_imputer import Imputer
-        print('SUCCESS: Test PyPI installation successful')
-        "
-
-  # Job 8: Publish to PyPI (Production)
+  # Job 6: Publish to PyPI (Production)
   publish-pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    needs: [validate-release, test-test-pypi, create-github-release]
+    needs: [validate-release, test-installation, create-github-release]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && needs.validate-release.outputs.is_prerelease == 'false' && !inputs.dry_run
     steps:
     - name: Download build artifacts
@@ -338,7 +281,7 @@ jobs:
         password: ${{ secrets.PYPI_API_TOKEN }}
         verbose: true
 
-  # Job 9: Post-Release Actions
+  # Job 7: Post-Release Actions
   post-release:
     name: Post-Release Actions
     runs-on: ubuntu-latest
