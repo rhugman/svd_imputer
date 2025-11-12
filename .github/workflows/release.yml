@@ -80,13 +80,13 @@ jobs:
         if [ ! -f CHANGELOG.md ]; then
           echo "Warning: CHANGELOG.md not found"
         else
-          echo "✅ Changelog found"
+          echo "SUCCESS: Changelog found"
         fi
         
     - name: Run basic tests
       run: |
         pip install -e .
-        python -c "import svd_imputer; print('✅ Package imports successfully')"
+        python -c "import svd_imputer; print('SUCCESS: Package imports successfully')"
 
   # Job 2: Run Full Test Suite
   test-before-release:
@@ -182,7 +182,7 @@ jobs:
         
         # Test basic import
         from svd_imputer import Imputer
-        print('✅ Imputer class imported successfully')
+        print('SUCCESS: Imputer class imported successfully')
         
         # Test basic functionality (without actually running imputation to keep it fast)
         import pandas as pd
@@ -190,7 +190,7 @@ jobs:
         dates = pd.date_range('2020-01-01', periods=10, freq='D')
         df = pd.DataFrame({'A': range(10)}, index=dates)
         imputer = Imputer(data=df, verbose=False)
-        print('✅ Imputer instantiated successfully')
+        print('SUCCESS: Imputer instantiated successfully')
         "
 
   # Job 5: Create GitHub Release
@@ -312,7 +312,7 @@ jobs:
         import svd_imputer
         print(f'Successfully installed from Test PyPI: {svd_imputer.__version__}')
         from svd_imputer import Imputer
-        print('✅ Test PyPI installation successful')
+        print('SUCCESS: Test PyPI installation successful')
         "
 
   # Job 8: Publish to PyPI (Production)
