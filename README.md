@@ -6,7 +6,6 @@
 
 A Python package for time series imputation using Singular Value Decomposition (SVD) with automatic rank estimation and uncertainty quantification.
 
-**📦 Now available on PyPI**: `pip install svd-imputer`
 
 ## Table of Contents
 - [Installation](#installation)  
