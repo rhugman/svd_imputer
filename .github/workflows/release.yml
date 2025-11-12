@@ -247,25 +247,20 @@ jobs:
         cat release_notes.md
         
     - name: Create GitHub Release
-      uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref_name }}
-        release_name: Release v${{ needs.validate-release.outputs.version }}
-        body_path: release_notes.md
-        draft: false
-        prerelease: ${{ needs.validate-release.outputs.is_prerelease }}
+      run: |
+        PRERELEASE_FLAG=""
+        if [ "${{ needs.validate-release.outputs.is_prerelease }}" = "true" ]; then
+          PRERELEASE_FLAG="--prerelease"
+        fi
         
-    - name: Upload release assets
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: dist/
-        asset_name: distribution-packages
-        asset_content_type: application/zip
+        # Create the release
+        gh release create v${{ needs.validate-release.outputs.version }} \
+          --title "Release v${{ needs.validate-release.outputs.version }}" \
+          --notes-file release_notes.md \
+          $PRERELEASE_FLAG \
+          dist/*
 
   # Job 6: Publish to Test PyPI
   publish-test-pypi:
