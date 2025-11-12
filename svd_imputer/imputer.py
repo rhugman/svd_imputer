@@ -44,7 +44,7 @@ def _configure_logger():
 _configure_logger()
 
 
-def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95) -> int:
+def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95, preprocessed=False) -> int:
     """
     Estimate optimal rank based on cumulative variance explained.
 
@@ -69,7 +69,13 @@ def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95) -> int:
     >>> rank = estimate_rank(X, variance_threshold=0.95)
     """
     # Use consistent preprocessing approach
-    X_temp, _ = preprocess_for_svd(X)
+    if not preprocessed:
+        X_temp, _ = preprocess_for_svd(X)
+    else:
+        X_temp = X.copy() #already standardized?
+        # Fill NaNs with column means for SVD
+        inds = np.where(np.isnan(X_temp))
+        X_temp[inds] = 0.0
 
     # Perform SVD
     logger.debug(f"Computing SVD for rank estimation on {X_temp.shape} matrix")
@@ -119,7 +125,7 @@ def compute_low_rank_approximation(X: np.ndarray, rank: int) -> np.ndarray:
     try:
         U, s, Vt = np.linalg.svd(X, full_matrices=False)
     except np.linalg.LinAlgError:
-        warnings.warn("SVD failed at iteration. Returning current state.", RuntimeWarning)
+        warnings.warn("SVD failed. Returning current state.", RuntimeWarning)
         return X
 
     # Low-rank approximation
@@ -174,6 +180,7 @@ def iterative_svd_impute(
     # Validate rank
     n_rows, n_cols = X.shape
     max_possible_rank = min(n_rows, n_cols)
+    
     if rank > max_possible_rank:
         raise ValueError(f"rank={rank} exceeds maximum possible rank {max_possible_rank} " f"for matrix with shape {X.shape}")
     # Store missing positions before preprocessing
@@ -438,6 +445,7 @@ def _block_mask_time(X: np.ndarray, block_len: int = 5, n_blocks: int = 1, seed:
 def _monte_carlo_validation(
     X: np.ndarray,
     rank: int,
+    variance_threshold: float,
     max_iters: int,
     tol: float,
     preprocessing_info: tuple,
@@ -509,8 +517,22 @@ def _monte_carlo_validation(
         masked_positions = np.logical_and(obs_all, ~mask)
         X_with_nans[masked_positions] = np.nan
 
+        # check if there are any rows that are entirely NaN
+        if np.any(np.all(np.isnan(X_with_nans), axis=1)):
+            raise ValueError("There are rows that are entirely NaN after masking. Adjust masking parameters.")
+
+        _rank = None
+        if isinstance(rank,int):
+            _rank = rank
+        elif isinstance(rank,str) and rank == 'auto':
+            warnings.warn("rank='auto' recalculating rank for each Monte Carlo iteration.",
+                          RuntimeWarning)
+            _rank = estimate_rank(X_with_nans, variance_threshold=variance_threshold,preprocessed=True)
+            assert _rank is not None
+        else:
+            raise ValueError(f"Unsupported rank type: {type(rank)}")
         # Impute
-        X_imputed = iterative_svd_impute(X_with_nans, rank=rank, max_iters=max_iters, tol=tol)
+        X_imputed = iterative_svd_impute(X_with_nans, rank=_rank, max_iters=max_iters, tol=tol)
 
         # Apply postprocessing to convert back to original scale
         X_imputed_postprocessed = postprocess_after_svd(X_imputed, preprocessing_info)
@@ -887,6 +909,7 @@ class Imputer:
                 fold_results = _monte_carlo_validation(
                     X_array,
                     rank=rank,
+                    variance_threshold=self.variance_threshold,
                     max_iters=self.max_iters,
                     tol=self.tol,
                     preprocessing_info=self.preprocessing_info_,
@@ -1010,6 +1033,7 @@ class Imputer:
         frac: float = 0.1,
         block_len: int = 5,
         n_blocks: int = 1,
+        rank: Optional[int] = None,
         seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
@@ -1060,14 +1084,17 @@ class Imputer:
             self.data_preprocessed_.values if isinstance(self.data_preprocessed_, pd.DataFrame) else self.data_preprocessed_
         )
 
+        if rank is None:
+            rank = self.rank_
+
         if self.verbose:
             logger.info(f"Estimating uncertainty with {n_repeats} Monte Carlo repeats...")
-            logger.info(f"Strategy: {mask_strategy}, Rank: {self.rank_}")
-
+            logger.info(f"Strategy: {mask_strategy}, Rank: {rank}")
         # Perform Monte Carlo validation
         results = _monte_carlo_validation(
             X_array,
-            rank=self.rank_,
+            rank=rank,
+            variance_threshold=self.variance_threshold,
             max_iters=self.max_iters,
             tol=self.tol,
             preprocessing_info=self.preprocessing_info_,
@@ -1282,7 +1309,8 @@ class Imputer:
                 X_new[col_mask, j] = self.preprocessing_info_[0][j]  # means from preprocessing
 
         # Apply standardization using original preprocessing parameters
-        X_standardized = preprocess_for_svd(X_new, self.preprocessing_info_)
+        means, stds = self.preprocessing_info_
+        X_standardized = (X_new - means) / stds
 
         # Reconstruct using cached SVD components
         # Project standardized data onto SVD subspace and reconstruct
