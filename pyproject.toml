@@ -7,7 +7,7 @@ name = "svd-imputer"
 description = "SVD-based time series imputation with uncertainty estimation"
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Rui Hugman"},
 ]
