@@ -14,6 +14,10 @@ from .imputer import Imputer
 from .preprocessing import validate_dataframe
 
 # Version information
-__version__ = "0.1.0"
+try:
+    from ._version import __version__
+except ImportError:
+    # Fallback for development installs without setuptools_scm
+    __version__ = "0.1.0"
 
 __all__ = ["Imputer", "validate_dataframe", "__version__"]
