@@ -201,6 +201,7 @@ def standardize_columns(X):
     -------
     X_standardized : np.ndarray
         Array of the same shape as X, with each column standardized (mean=0, std=1).
+        For columns with zero variance (std=0), values are set to 0.
     means : np.ndarray
         1D array of means for each column (shape: n_features,).
     stds : np.ndarray
@@ -209,10 +210,19 @@ def standardize_columns(X):
     Notes
     -----
     NaN values are ignored when computing means and standard deviations, and remain in the output.
+    Columns with zero variance (constant values) are standardized to zeros.
     """
     means = np.nanmean(X, axis=0)
     stds = np.nanstd(X, axis=0)
-    X_standardized = (X - means) / stds
+
+    # Handle division by zero for columns with no variance
+    with np.errstate(divide="ignore", invalid="ignore"):
+        X_standardized = (X - means) / stds
+
+    # Set standardized values to 0 for columns with zero variance
+    zero_var_mask = stds == 0
+    X_standardized[:, zero_var_mask] = 0
+
     return X_standardized, means, stds
 
 
