@@ -214,15 +214,15 @@ def standardize_columns(X):
     """
     means = np.nanmean(X, axis=0)
     stds = np.nanstd(X, axis=0)
-    
+
     # Handle division by zero for columns with no variance
-    with np.errstate(divide='ignore', invalid='ignore'):
+    with np.errstate(divide="ignore", invalid="ignore"):
         X_standardized = (X - means) / stds
-    
+
     # Set standardized values to 0 for columns with zero variance
     zero_var_mask = stds == 0
     X_standardized[:, zero_var_mask] = 0
-    
+
     return X_standardized, means, stds
 
 
