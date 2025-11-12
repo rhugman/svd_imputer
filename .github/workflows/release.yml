@@ -287,6 +287,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [validate-release, publish-pypi]
     if: always() && (needs.publish-pypi.result == 'success' || needs.publish-pypi.result == 'skipped')
+    permissions:
+      contents: write
+      issues: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -300,41 +303,10 @@ jobs:
         echo "Released version ${{ needs.validate-release.outputs.version }}"
         echo "Ready for next development cycle"
         
-    - name: Create post-release issue
-      if: needs.publish-pypi.result == 'success'
-      uses: actions/github-script@v6
-      with:
-        script: |
-          github.rest.issues.create({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            title: `Post-release tasks for v${{ needs.validate-release.outputs.version }}`,
-            body: `
-            ## 🎉 Release v${{ needs.validate-release.outputs.version }} Published Successfully!
-            
-            ### Completed:
-            - ✅ Built and tested packages
-            - ✅ Published to PyPI
-            - ✅ Created GitHub release
-            
-            ### Post-release tasks:
-            - [ ] Update documentation with new version
-            - [ ] Announce release on social media/blog
-            - [ ] Update any dependent projects
-            - [ ] Plan next version features
-            - [ ] Close milestone if applicable
-            
-            ### Links:
-            - [PyPI Release](https://pypi.org/project/svd-imputer/${{ needs.validate-release.outputs.version }}/)
-            - [GitHub Release](https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate-release.outputs.version }})
-            
-            This issue was automatically created by the release workflow.
-            `,
-            labels: ['release', 'automated']
-          })
-          
-    - name: Send release notification
+    - name: Release Success Notification
       if: needs.publish-pypi.result == 'success'
       run: |
         echo "🎉 Successfully released v${{ needs.validate-release.outputs.version }} to PyPI!"
         echo "Package is now available: pip install svd-imputer==${{ needs.validate-release.outputs.version }}"
+        echo "PyPI: https://pypi.org/project/svd-imputer/${{ needs.validate-release.outputs.version }}/"
+        echo "GitHub: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate-release.outputs.version }}"
