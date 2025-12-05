@@ -71,19 +71,12 @@ def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95) -> int:
     # Use consistent preprocessing approach
     X_temp, _ = preprocess_for_svd(X)
 
+    # Fill missing values with 0.0 (mean in standardized space) for rank estimation
+    X_temp = np.where(np.isnan(X_temp), 0.0, X_temp)
+
     # Perform SVD
-    # Check if any element is NaN or Inf
-    assert not np.all(np.isfinite(X_temp)), "Matrix contains NaN or Inf values!"
-    
     logger.debug(f"Computing SVD for rank estimation on {X_temp.shape} matrix")
-    try:
-        _, s, _ = np.linalg.svd(X_temp, full_matrices=False)
-    except np.linalg.LinAlgError:
-        # return the error message
-        _, s, _ = np.linalg.svd(X_temp, full_matrices=False)
-        logger.warning("SVD computation failed during rank estimation. Using rank=1 as fallback.")
-        warnings.warn("SVD computation failed. Using rank=1 as fallback.", RuntimeWarning)
-        return 1
+    _, s, _ = np.linalg.svd(X_temp, full_matrices=False)
 
     # Calculate cumulative variance explained
     variance_explained = (s**2) / np.sum(s**2)
@@ -121,11 +114,7 @@ def compute_low_rank_approximation(X: np.ndarray, rank: int) -> np.ndarray:
         Low-rank approximation of the input matrix
     """
     # Perform SVD
-    try:
-        U, s, Vt = np.linalg.svd(X, full_matrices=False)
-    except np.linalg.LinAlgError:
-        warnings.warn("SVD failed at iteration. Returning current state.", RuntimeWarning)
-        return X
+    U, s, Vt = np.linalg.svd(X, full_matrices=False)
 
     # Low-rank approximation
     S = np.diag(s[:rank])
@@ -201,16 +190,8 @@ def iterative_svd_impute(
     logger.debug(f"Starting iterative SVD imputation (rank={rank}, max_iters={max_iters}, tol={tol})")
     for it in range(max_iters):
         # Compute SVD and store components for potential return
-        try:
-            U, s, Vt = np.linalg.svd(X_filled, full_matrices=False)
-            final_svd = {"U": U[:, :rank], "s": s[:rank], "Vt": Vt[:rank, :]}
-        except np.linalg.LinAlgError:
-            logger.warning(f"SVD failed at iteration {it}. Returning current state.")
-            warnings.warn(
-                f"SVD failed at iteration {it}. Returning current state.",
-                RuntimeWarning,
-            )
-            break
+        U, s, Vt = np.linalg.svd(X_filled, full_matrices=False)
+        final_svd = {"U": U[:, :rank], "s": s[:rank], "Vt": Vt[:rank, :]}
 
         # Compute low-rank approximation
         X_approx = compute_low_rank_approximation(X_filled, rank)
