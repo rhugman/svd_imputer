@@ -71,17 +71,28 @@ def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95, preprocessed=
     # Use consistent preprocessing approach
     if not preprocessed:
         X_temp, _ = preprocess_for_svd(X)
+        # Check if any element is NaN or Inf
+        assert not np.all(np.isfinite(X_temp)), "Matrix contains NaN or Inf values!"
+
     else:
         X_temp = X.copy()  # already standardized?
         # Fill NaNs with column means for SVD
         inds = np.where(np.isnan(X_temp))
         X_temp[inds] = 0.0
+        # Check if any element is NaN or Inf
+        assert not np.all(np.isfinite(X_temp)), "Matrix contains NaN or Inf values!"
+        
 
     # Perform SVD
+    # Check if any element is NaN or Inf
+    assert not np.all(np.isfinite(X_temp)), "Matrix contains NaN or Inf values!"
+    
     logger.debug(f"Computing SVD for rank estimation on {X_temp.shape} matrix")
     try:
         _, s, _ = np.linalg.svd(X_temp, full_matrices=False)
     except np.linalg.LinAlgError:
+        # return the error message
+        _, s, _ = np.linalg.svd(X_temp, full_matrices=False)
         logger.warning("SVD computation failed during rank estimation. Using rank=1 as fallback.")
         warnings.warn("SVD computation failed. Using rank=1 as fallback.", RuntimeWarning)
         return 1
@@ -526,7 +537,7 @@ def _monte_carlo_validation(
             _rank = rank
         elif isinstance(rank, str) and rank == "auto":
             warnings.warn("rank='auto' recalculating rank for each Monte Carlo iteration.", RuntimeWarning)
-            _rank = estimate_rank(X_with_nans, variance_threshold=variance_threshold, preprocessed=True)
+            _rank = estimate_rank(X_with_nans, variance_threshold=variance_threshold, preprocessed=False)
             assert _rank is not None
         else:
             raise ValueError(f"Unsupported rank type: {type(rank)}")
