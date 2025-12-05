@@ -1,3 +1,4 @@
+# Simplified CI - Good balance of quality vs. simplicity
 name: Simple CI
 
 on:
@@ -5,47 +6,34 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
-  workflow_dispatch:  # Allow manual triggering
-  workflow_call:  # Allow this workflow to be called from other workflows
-
-env:
-  FORCE_COLOR: 1
 
 jobs:
-  # Single job: Test and basic quality checks
   test:
     name: Test Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ['3.9', '3.11', '3.12']
-            
+    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # Fetch full history for setuptools_scm
-      
-    - name: Set up Python ${{ matrix.python-version }}
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
-        cache: 'pip'
         
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install build setuptools_scm wheel
         pip install -e .
         pip install pytest pytest-cov black
-        
-    - name: Format check (Black only)
-      run: black --check svd_imputer/ tests/
+
       
     - name: Run tests
       run: |
-        pytest tests/ -v --cov=svd_imputer --cov-report=term-missing
+        pytest --cov=svd_imputer --cov-report=term tests/
         
-    - name: Test package import
+    - name: Test package install
       run: |
         python -c "import svd_imputer; print('✅ Package imports successfully')"

@@ -1308,7 +1308,7 @@ class Imputer:
                 X_new[col_mask, j] = self.preprocessing_info_[0][j]  # means from preprocessing
 
         # Apply standardization using original preprocessing parameters
-        X_standardized = preprocess_for_svd(X_new, self.preprocessing_info_)
+        X_standardized,_ = preprocess_for_svd(X_new)
 
         # Reconstruct using cached SVD components
         # Project standardized data onto SVD subspace and reconstruct
