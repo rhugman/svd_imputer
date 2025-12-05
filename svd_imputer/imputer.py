@@ -1617,43 +1617,11 @@ class Imputer:
             
             imputed_matrices.append(X_imputed_post)
             
-            # Get residual variance (sigma_sq) from the stochastic run
-            # Note: sigma_sq is in the preprocessed (standardized) scale.
-            # We need to scale it back if we want uncertainty in original units?
-            # Wait, Rubin's rules combine variances.
-            # If X_imputed_post is in original scale, we should probably calculate variance in original scale?
-            # But sigma_sq is the variance of the residuals in the SVD space.
-            # The noise added was in SVD space.
-            # When we postprocess, we multiply by scale and add mean.
-            # Var(aX + b) = a^2 Var(X).
-            # So we should scale sigma_sq by scale^2.
-            
-            # Get scale from preprocessing info
-            # preprocessing_info is (means, scales)
+            # Calculate element-wise residual variance in original scale.
+            # sigma_sq is the variance of residuals in standardized space.
+            # Since Var(aX + b) = a^2 Var(X), we scale sigma_sq by scales^2.
+            # This represents the "Within Variance" for Rubin's rules.
             _, scales = self.preprocessing_info_
-            
-            # If scales is an array (per column), we need to handle it.
-            # sigma_sq from iterative_svd_impute is a scalar (mean over all observed).
-            # But the noise was added to all elements.
-            # If we want element-wise uncertainty, we should consider that the noise 
-            # is scaled differently for each column if scales are different.
-            
-            # Let's assume sigma_sq is the variance of the noise added to the standardized data.
-            # The noise added was N(0, sigma_sq).
-            # So the variance of the noise component in standardized data is sigma_sq.
-            # In original data, for column j, the variance contribution is sigma_sq * scales[j]**2.
-            
-            # However, Rubin's rules use the residual variance of the *model*.
-            # Here, sigma_sq is exactly that.
-            # So for each column j, the "Within Variance" contribution from this run is sigma_sq * scales[j]**2.
-            
-            # Let's store the element-wise variance matrix for this run.
-            # Since sigma_sq is scalar (homoscedastic assumption in standardized space),
-            # the variance matrix is broadcasted.
-            
-            # Create a variance matrix for this run
-            # Shape (n_rows, n_cols)
-            # Each column j has variance sigma_sq * scales[j]**2
             
             # Handle scales being scalar or array
             if np.isscalar(scales):
