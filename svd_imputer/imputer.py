@@ -44,7 +44,7 @@ def _configure_logger():
 _configure_logger()
 
 
-def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95, preprocessed=False) -> int:
+def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95) -> int:
     """
     Estimate optimal rank based on cumulative variance explained.
 
@@ -69,19 +69,7 @@ def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95, preprocessed=
     >>> rank = estimate_rank(X, variance_threshold=0.95)
     """
     # Use consistent preprocessing approach
-    if not preprocessed:
-        X_temp, _ = preprocess_for_svd(X)
-        # Check if any element is NaN or Inf
-        assert not np.all(np.isfinite(X_temp)), "Matrix contains NaN or Inf values!"
-
-    else:
-        X_temp = X.copy()  # already standardized?
-        # Fill NaNs with column means for SVD
-        inds = np.where(np.isnan(X_temp))
-        X_temp[inds] = 0.0
-        # Check if any element is NaN or Inf
-        assert not np.all(np.isfinite(X_temp)), "Matrix contains NaN or Inf values!"
-        
+    X_temp, _ = preprocess_for_svd(X)
 
     # Perform SVD
     # Check if any element is NaN or Inf
@@ -136,7 +124,7 @@ def compute_low_rank_approximation(X: np.ndarray, rank: int) -> np.ndarray:
     try:
         U, s, Vt = np.linalg.svd(X, full_matrices=False)
     except np.linalg.LinAlgError:
-        warnings.warn("SVD failed. Returning current state.", RuntimeWarning)
+        warnings.warn("SVD failed at iteration. Returning current state.", RuntimeWarning)
         return X
 
     # Low-rank approximation
@@ -456,7 +444,6 @@ def _block_mask_time(X: np.ndarray, block_len: int = 5, n_blocks: int = 1, seed:
 def _monte_carlo_validation(
     X: np.ndarray,
     rank: int,
-    variance_threshold: float,
     max_iters: int,
     tol: float,
     preprocessing_info: tuple,
@@ -542,7 +529,7 @@ def _monte_carlo_validation(
         else:
             raise ValueError(f"Unsupported rank type: {type(rank)}")
         # Impute
-        X_imputed = iterative_svd_impute(X_with_nans, rank=_rank, max_iters=max_iters, tol=tol)
+        X_imputed = iterative_svd_impute(X_with_nans, rank=rank, max_iters=max_iters, tol=tol)
 
         # Apply postprocessing to convert back to original scale
         X_imputed_postprocessed = postprocess_after_svd(X_imputed, preprocessing_info)
@@ -919,7 +906,6 @@ class Imputer:
                 fold_results = _monte_carlo_validation(
                     X_array,
                     rank=rank,
-                    variance_threshold=self.variance_threshold,
                     max_iters=self.max_iters,
                     tol=self.tol,
                     preprocessing_info=self.preprocessing_info_,
@@ -1043,7 +1029,6 @@ class Imputer:
         frac: float = 0.1,
         block_len: int = 5,
         n_blocks: int = 1,
-        rank: Optional[int] = None,
         seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
@@ -1094,17 +1079,14 @@ class Imputer:
             self.data_preprocessed_.values if isinstance(self.data_preprocessed_, pd.DataFrame) else self.data_preprocessed_
         )
 
-        if rank is None:
-            rank = self.rank_
-
         if self.verbose:
             logger.info(f"Estimating uncertainty with {n_repeats} Monte Carlo repeats...")
-            logger.info(f"Strategy: {mask_strategy}, Rank: {rank}")
+            logger.info(f"Strategy: {mask_strategy}, Rank: {self.rank_}")
+
         # Perform Monte Carlo validation
         results = _monte_carlo_validation(
             X_array,
-            rank=rank,
-            variance_threshold=self.variance_threshold,
+            rank=self.rank_,
             max_iters=self.max_iters,
             tol=self.tol,
             preprocessing_info=self.preprocessing_info_,
@@ -1319,8 +1301,7 @@ class Imputer:
                 X_new[col_mask, j] = self.preprocessing_info_[0][j]  # means from preprocessing
 
         # Apply standardization using original preprocessing parameters
-        means, stds = self.preprocessing_info_
-        X_standardized = (X_new - means) / stds
+        X_standardized = preprocess_for_svd(X_new, self.preprocessing_info_)
 
         # Reconstruct using cached SVD components
         # Project standardized data onto SVD subspace and reconstruct
