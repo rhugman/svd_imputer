@@ -842,9 +842,35 @@ class Imputer:
 
         # Determine rank range
         if rank_range is None:
-            max_possible = min(n_rows, n_cols)
-            # max_test = min(max_possible, 10)  # Reasonable upper bound
-            rank_range = (1, max_possible)
+            if self.verbose:
+                logger.info("Estimating rank range based on variance thresholds (0.75 - 0.95)...")
+
+            # Fill missing values with 0.0 (mean) for estimation
+            X_filled = np.where(np.isnan(X_array), 0.0, X_array)
+
+            # Compute SVD once
+            _, s, _ = np.linalg.svd(X_filled, full_matrices=False)
+
+            # Calculate cumulative variance
+            variance_explained = (s**2) / np.sum(s**2)
+            cumulative_variance = np.cumsum(variance_explained)
+
+            # Find ranks for thresholds
+            min_rank = np.searchsorted(cumulative_variance, 0.75) + 1
+            max_rank = np.searchsorted(cumulative_variance, 0.95) + 1
+
+            # Ensure valid range
+            max_possible = len(s)
+            min_rank = max(1, min(min_rank, max_possible))
+            max_rank = max(1, min(max_rank, max_possible))
+
+            if max_rank < min_rank:
+                max_rank = min_rank
+
+            rank_range = (int(min_rank), int(max_rank))
+
+            if self.verbose:
+                logger.info(f"Auto-selected rank range: {rank_range} based on variance.")
 
         min_rank, max_rank = rank_range
         if min_rank < 1:
