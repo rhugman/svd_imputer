@@ -6,7 +6,6 @@
 
 A Python package for time series imputation using Singular Value Decomposition (SVD) with automatic rank estimation and uncertainty quantification.
 
-
 ## Table of Contents
 - [Installation](#installation)  
 - [Quick Start](#quick-start)
