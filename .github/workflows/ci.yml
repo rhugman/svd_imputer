@@ -1,11 +1,12 @@
-# Simplified CI - Good balance of quality vs. simplicity
-name: Simple CI
+# Simplified CI
+name: vorflow CI
 
 on:
   push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  workflow_call:
 
 jobs:
   test:
