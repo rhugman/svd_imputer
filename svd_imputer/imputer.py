@@ -44,7 +44,7 @@ def _configure_logger():
 _configure_logger()
 
 
-def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95, preprocessed=False) -> int:
+def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95) -> int:
     """
     Estimate optimal rank based on cumulative variance explained.
 
@@ -69,22 +69,14 @@ def estimate_rank(X: np.ndarray, variance_threshold: float = 0.95, preprocessed=
     >>> rank = estimate_rank(X, variance_threshold=0.95)
     """
     # Use consistent preprocessing approach
-    if not preprocessed:
-        X_temp, _ = preprocess_for_svd(X)
-    else:
-        X_temp = X.copy()  # already standardized?
-        # Fill NaNs with column means for SVD
-        inds = np.where(np.isnan(X_temp))
-        X_temp[inds] = 0.0
+    X_temp, _ = preprocess_for_svd(X)
+
+    # Fill missing values with 0.0 (mean in standardized space) for rank estimation
+    X_temp = np.where(np.isnan(X_temp), 0.0, X_temp)
 
     # Perform SVD
     logger.debug(f"Computing SVD for rank estimation on {X_temp.shape} matrix")
-    try:
-        _, s, _ = np.linalg.svd(X_temp, full_matrices=False)
-    except np.linalg.LinAlgError:
-        logger.warning("SVD computation failed during rank estimation. Using rank=1 as fallback.")
-        warnings.warn("SVD computation failed. Using rank=1 as fallback.", RuntimeWarning)
-        return 1
+    _, s, _ = np.linalg.svd(X_temp, full_matrices=False)
 
     # Calculate cumulative variance explained
     variance_explained = (s**2) / np.sum(s**2)
@@ -122,11 +114,7 @@ def compute_low_rank_approximation(X: np.ndarray, rank: int) -> np.ndarray:
         Low-rank approximation of the input matrix
     """
     # Perform SVD
-    try:
-        U, s, Vt = np.linalg.svd(X, full_matrices=False)
-    except np.linalg.LinAlgError:
-        warnings.warn("SVD failed. Returning current state.", RuntimeWarning)
-        return X
+    U, s, Vt = np.linalg.svd(X, full_matrices=False)
 
     # Low-rank approximation
     S = np.diag(s[:rank])
@@ -202,16 +190,8 @@ def iterative_svd_impute(
     logger.debug(f"Starting iterative SVD imputation (rank={rank}, max_iters={max_iters}, tol={tol})")
     for it in range(max_iters):
         # Compute SVD and store components for potential return
-        try:
-            U, s, Vt = np.linalg.svd(X_filled, full_matrices=False)
-            final_svd = {"U": U[:, :rank], "s": s[:rank], "Vt": Vt[:rank, :]}
-        except np.linalg.LinAlgError:
-            logger.warning(f"SVD failed at iteration {it}. Returning current state.")
-            warnings.warn(
-                f"SVD failed at iteration {it}. Returning current state.",
-                RuntimeWarning,
-            )
-            break
+        U, s, Vt = np.linalg.svd(X_filled, full_matrices=False)
+        final_svd = {"U": U[:, :rank], "s": s[:rank], "Vt": Vt[:rank, :]}
 
         # Compute low-rank approximation
         X_approx = compute_low_rank_approximation(X_filled, rank)
@@ -445,7 +425,6 @@ def _block_mask_time(X: np.ndarray, block_len: int = 5, n_blocks: int = 1, seed:
 def _monte_carlo_validation(
     X: np.ndarray,
     rank: int,
-    variance_threshold: float,
     max_iters: int,
     tol: float,
     preprocessing_info: tuple,
@@ -526,12 +505,12 @@ def _monte_carlo_validation(
             _rank = rank
         elif isinstance(rank, str) and rank == "auto":
             warnings.warn("rank='auto' recalculating rank for each Monte Carlo iteration.", RuntimeWarning)
-            _rank = estimate_rank(X_with_nans, variance_threshold=variance_threshold, preprocessed=True)
+            _rank = estimate_rank(X_with_nans, variance_threshold=variance_threshold, preprocessed=False)
             assert _rank is not None
         else:
             raise ValueError(f"Unsupported rank type: {type(rank)}")
         # Impute
-        X_imputed = iterative_svd_impute(X_with_nans, rank=_rank, max_iters=max_iters, tol=tol)
+        X_imputed = iterative_svd_impute(X_with_nans, rank=rank, max_iters=max_iters, tol=tol)
 
         # Apply postprocessing to convert back to original scale
         X_imputed_postprocessed = postprocess_after_svd(X_imputed, preprocessing_info)
@@ -863,9 +842,35 @@ class Imputer:
 
         # Determine rank range
         if rank_range is None:
-            max_possible = min(n_rows, n_cols)
-            # max_test = min(max_possible, 10)  # Reasonable upper bound
-            rank_range = (1, max_possible)
+            if self.verbose:
+                logger.info("Estimating rank range based on variance thresholds (0.75 - 0.95)...")
+
+            # Fill missing values with 0.0 (mean) for estimation
+            X_filled = np.where(np.isnan(X_array), 0.0, X_array)
+
+            # Compute SVD once
+            _, s, _ = np.linalg.svd(X_filled, full_matrices=False)
+
+            # Calculate cumulative variance
+            variance_explained = (s**2) / np.sum(s**2)
+            cumulative_variance = np.cumsum(variance_explained)
+
+            # Find ranks for thresholds
+            min_rank = np.searchsorted(cumulative_variance, 0.75) + 1
+            max_rank = np.searchsorted(cumulative_variance, 0.95) + 1
+
+            # Ensure valid range
+            max_possible = len(s)
+            min_rank = max(1, min(min_rank, max_possible))
+            max_rank = max(1, min(max_rank, max_possible))
+
+            if max_rank < min_rank:
+                max_rank = min_rank
+
+            rank_range = (int(min_rank), int(max_rank))
+
+            if self.verbose:
+                logger.info(f"Auto-selected rank range: {rank_range} based on variance.")
 
         min_rank, max_rank = rank_range
         if min_rank < 1:
@@ -908,7 +913,6 @@ class Imputer:
                 fold_results = _monte_carlo_validation(
                     X_array,
                     rank=rank,
-                    variance_threshold=self.variance_threshold,
                     max_iters=self.max_iters,
                     tol=self.tol,
                     preprocessing_info=self.preprocessing_info_,
@@ -1032,7 +1036,6 @@ class Imputer:
         frac: float = 0.1,
         block_len: int = 5,
         n_blocks: int = 1,
-        rank: Optional[int] = None,
         seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
@@ -1083,17 +1086,14 @@ class Imputer:
             self.data_preprocessed_.values if isinstance(self.data_preprocessed_, pd.DataFrame) else self.data_preprocessed_
         )
 
-        if rank is None:
-            rank = self.rank_
-
         if self.verbose:
             logger.info(f"Estimating uncertainty with {n_repeats} Monte Carlo repeats...")
-            logger.info(f"Strategy: {mask_strategy}, Rank: {rank}")
+            logger.info(f"Strategy: {mask_strategy}, Rank: {self.rank_}")
+
         # Perform Monte Carlo validation
         results = _monte_carlo_validation(
             X_array,
-            rank=rank,
-            variance_threshold=self.variance_threshold,
+            rank=self.rank_,
             max_iters=self.max_iters,
             tol=self.tol,
             preprocessing_info=self.preprocessing_info_,
@@ -1308,8 +1308,7 @@ class Imputer:
                 X_new[col_mask, j] = self.preprocessing_info_[0][j]  # means from preprocessing
 
         # Apply standardization using original preprocessing parameters
-        means, stds = self.preprocessing_info_
-        X_standardized = (X_new - means) / stds
+        X_standardized = preprocess_for_svd(X_new, self.preprocessing_info_)
 
         # Reconstruct using cached SVD components
         # Project standardized data onto SVD subspace and reconstruct
