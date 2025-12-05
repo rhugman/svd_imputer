@@ -128,7 +128,9 @@ def iterative_svd_impute(
     max_iters: int = 500,
     tol: float = 1e-4,
     return_svd: bool = False,
-) -> Union[np.ndarray, Tuple[np.ndarray, Dict[str, np.ndarray]]]:
+    stochastic: bool = False,
+    random_state: Optional[Union[int, np.random.Generator]] = None,
+) -> Union[np.ndarray, Tuple[np.ndarray, Dict[str, Any]]]:
     """
     Impute missing values using iterative SVD.
 
@@ -149,11 +151,18 @@ def iterative_svd_impute(
         Maximum number of iterations (default: 500)
     tol : float, optional
         Convergence tolerance (default: 1e-4)
+    return_svd : bool, optional
+        Whether to return SVD components (default: False)
+    stochastic : bool, optional
+        Whether to use stochastic imputation (default: False)
+    random_state : int or np.random.Generator, optional
+        Random seed for stochastic imputation
 
     Returns
     -------
-    np.ndarray
-        Array with imputed values
+    np.ndarray or tuple
+        Array with imputed values. If return_svd is True, returns (X_imputed, svd_dict).
+        If stochastic is True, svd_dict includes 'sigma_sq' (residual variance).
 
     Raises
     ------
@@ -171,8 +180,13 @@ def iterative_svd_impute(
 
     if rank > max_possible_rank:
         raise ValueError(f"rank={rank} exceeds maximum possible rank {max_possible_rank} " f"for matrix with shape {X.shape}")
+    
+    # Initialize random generator if stochastic
+    rng = np.random.default_rng(random_state) if stochastic else None
+
     # Store missing positions before preprocessing
     inds = np.where(np.isnan(X))
+    observed_mask = ~np.isnan(X)
 
     # Preprocess (this now preserves missing values)
     X_filled, preprocessing_info = preprocess_for_svd(X)
@@ -187,7 +201,9 @@ def iterative_svd_impute(
     # Step 2: Iterative updates
     converged = False
     final_svd = None
-    logger.debug(f"Starting iterative SVD imputation (rank={rank}, max_iters={max_iters}, tol={tol})")
+    sigma_sq = 0.0
+
+    logger.debug(f"Starting iterative SVD imputation (rank={rank}, max_iters={max_iters}, tol={tol}, stochastic={stochastic})")
     for it in range(max_iters):
         # Compute SVD and store components for potential return
         U, s, Vt = np.linalg.svd(X_filled, full_matrices=False)
@@ -198,7 +214,22 @@ def iterative_svd_impute(
 
         # Update only the originally missing entries
         X_new = X_filled.copy()
-        X_new[inds] = X_approx[inds]
+        
+        if stochastic:
+            # Calculate residual variance on observed data
+            # Residuals = Observed - Approximation
+            residuals = X_filled[observed_mask] - X_approx[observed_mask]
+            sigma_sq = np.mean(residuals**2)
+            
+            # Add Gaussian noise to the imputed values
+            # Noise ~ N(0, sigma_sq)
+            noise = rng.normal(0, np.sqrt(sigma_sq), size=X.shape)
+            
+            # Update missing values with approximation + noise
+            X_new[inds] = X_approx[inds] + noise[inds]
+        else:
+            # Deterministic update
+            X_new[inds] = X_approx[inds]
 
         # Check convergence
         diff = np.linalg.norm(X_new - X_filled) / np.linalg.norm(X_filled)
@@ -219,6 +250,8 @@ def iterative_svd_impute(
     X_filled = postprocess_after_svd(X_filled, preprocessing_info)
 
     if return_svd and final_svd is not None:
+        if stochastic:
+            final_svd["sigma_sq"] = sigma_sq
         return X_filled, final_svd
     else:
         return X_filled
@@ -1486,32 +1519,37 @@ class Imputer:
     def fit_transform(
         self,
         return_uncertainty: bool = False,
+        n_imputations: int = 5,
         n_repeats: int = 100,
         mask_strategy: str = "block",
         frac: float = 0.1,
         block_len: int = 5,
         n_blocks: int = 1,
         seed: Optional[int] = None,
-    ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, Dict[str, Any]]]:
+    ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, Union[Dict[str, Any], pd.DataFrame]]]:
         """
         Fit the imputer and transform the stored data in one step.
 
-        Optionally compute uncertainty estimates using Monte Carlo validation.
+        If return_uncertainty is True, uses Multiple Imputation with Stochastic SVD
+        and Rubin's Rules to estimate uncertainty.
 
         Parameters
         ----------
         return_uncertainty : bool, optional
             Whether to return uncertainty estimates (default: False)
+        n_imputations : int, optional
+            Number of multiple imputations for uncertainty estimation (default: 5).
+            Used when return_uncertainty=True.
         n_repeats : int, optional
-            Number of Monte Carlo repeats for validation (default: 100)
+            Deprecated. Used for old Monte Carlo validation.
         mask_strategy : str, optional
-            Masking strategy for Monte Carlo: 'random' or 'block' (default: 'block')
+            Deprecated. Used for old Monte Carlo validation.
         frac : float, optional
-            Fraction to mask for 'random' strategy (default: 0.1)
+            Deprecated. Used for old Monte Carlo validation.
         block_len : int, optional
-            Block length for 'block' strategy (default: 5)
+            Deprecated. Used for old Monte Carlo validation.
         n_blocks : int, optional
-            Number of blocks for 'block' strategy (default: 1)
+            Deprecated. Used for old Monte Carlo validation.
         seed : int, optional
             Random seed for reproducibility
 
@@ -1519,7 +1557,8 @@ class Imputer:
         -------
         pd.DataFrame or tuple
             If return_uncertainty=False: Returns imputed DataFrame
-            If return_uncertainty=True: Returns (imputed_df, uncertainty_dict)
+            If return_uncertainty=True: Returns (imputed_df_mean, uncertainty_df)
+            where uncertainty_df contains standard deviations per element.
 
         Examples
         --------
@@ -1527,26 +1566,147 @@ class Imputer:
         >>> imputer = Imputer(data)
         >>> df_imputed = imputer.fit_transform()
 
-        >>> # With Monte Carlo uncertainty
-        >>> df_imputed, unc = imputer.fit_transform(
-        ...     return_uncertainty=True
+        >>> # With Multiple Imputation uncertainty
+        >>> df_imputed, df_uncertainty = imputer.fit_transform(
+        ...     return_uncertainty=True, n_imputations=10
         ... )
-        >>> print(f"RMSE: {unc['rmse']:.3f}")
-
-
         """
         if not return_uncertainty:
             # Standard behavior - no uncertainty
             return self.fit().transform()
 
-        # Fit and transform
-        self.fit()
-        df_imputed = self.transform()
+        # Fit first to determine rank
+        if not self.is_fitted_:
+            self.fit()
 
-        # Compute uncertainty using Monte Carlo validation
-        uncertainty_dict = self._uncertainty_monte_carlo(n_repeats, mask_strategy, frac, block_len, n_blocks, seed)
+        # Work with stored preprocessed data
+        X_array = (
+            self.data_preprocessed_.values if isinstance(self.data_preprocessed_, pd.DataFrame) else self.data_preprocessed_
+        )
 
-        return df_imputed, uncertainty_dict
+        if self.verbose:
+            logger.info(f"Performing Multiple Imputation with {n_imputations} stochastic runs...")
+
+        # Initialize random generator
+        rng = np.random.default_rng(seed)
+        
+        imputed_matrices = []
+        residual_variances = []
+
+        for i in range(n_imputations):
+            # Generate a seed for this run
+            run_seed = rng.integers(1 << 30)
+            
+            # Run stochastic imputation
+            # We need to pass return_svd=True to get the residual variance (sigma_sq)
+            X_imputed, svd_res = iterative_svd_impute(
+                X_array, 
+                rank=self.rank_, 
+                max_iters=self.max_iters, 
+                tol=self.tol, 
+                return_svd=True,
+                stochastic=True,
+                random_state=run_seed
+            )
+            
+            # Extract residual variance
+            sigma_sq = svd_res["sigma_sq"]
+            
+            # Postprocess to original scale
+            X_imputed_post = postprocess_after_svd(X_imputed, self.preprocessing_info_)
+            
+            imputed_matrices.append(X_imputed_post)
+            
+            # Get residual variance (sigma_sq) from the stochastic run
+            # Note: sigma_sq is in the preprocessed (standardized) scale.
+            # We need to scale it back if we want uncertainty in original units?
+            # Wait, Rubin's rules combine variances.
+            # If X_imputed_post is in original scale, we should probably calculate variance in original scale?
+            # But sigma_sq is the variance of the residuals in the SVD space.
+            # The noise added was in SVD space.
+            # When we postprocess, we multiply by scale and add mean.
+            # Var(aX + b) = a^2 Var(X).
+            # So we should scale sigma_sq by scale^2.
+            
+            # Get scale from preprocessing info
+            # preprocessing_info is (means, scales)
+            _, scales = self.preprocessing_info_
+            
+            # If scales is an array (per column), we need to handle it.
+            # sigma_sq from iterative_svd_impute is a scalar (mean over all observed).
+            # But the noise was added to all elements.
+            # If we want element-wise uncertainty, we should consider that the noise 
+            # is scaled differently for each column if scales are different.
+            
+            # Let's assume sigma_sq is the variance of the noise added to the standardized data.
+            # The noise added was N(0, sigma_sq).
+            # So the variance of the noise component in standardized data is sigma_sq.
+            # In original data, for column j, the variance contribution is sigma_sq * scales[j]**2.
+            
+            # However, Rubin's rules use the residual variance of the *model*.
+            # Here, sigma_sq is exactly that.
+            # So for each column j, the "Within Variance" contribution from this run is sigma_sq * scales[j]**2.
+            
+            # Let's store the element-wise variance matrix for this run.
+            # Since sigma_sq is scalar (homoscedastic assumption in standardized space),
+            # the variance matrix is broadcasted.
+            
+            # Create a variance matrix for this run
+            # Shape (n_rows, n_cols)
+            # Each column j has variance sigma_sq * scales[j]**2
+            
+            # Handle scales being scalar or array
+            if np.isscalar(scales):
+                run_variance = np.full(X_array.shape, sigma_sq * (scales**2))
+            else:
+                # scales is array of shape (n_cols,)
+                run_variance = np.outer(np.ones(X_array.shape[0]), sigma_sq * (scales**2))
+                
+            residual_variances.append(run_variance)
+
+        # Apply Rubin's Rules
+        # 1. Point Estimate: Mean of imputed matrices
+        # Stack matrices: (n_imputations, n_rows, n_cols)
+        M_stack = np.stack(imputed_matrices, axis=0)
+        point_estimate = np.mean(M_stack, axis=0)
+        
+        # 2. Within-Variance (W): Average of residual variances
+        # Stack variances: (n_imputations, n_rows, n_cols)
+        W_stack = np.stack(residual_variances, axis=0)
+        W = np.mean(W_stack, axis=0)
+        
+        # 3. Between-Variance (B): Variance of the point estimates
+        # B = 1/(M-1) * sum((X_m - X_bar)^2)
+        if n_imputations > 1:
+            B = np.var(M_stack, axis=0, ddof=1)
+        else:
+            B = np.zeros_like(point_estimate)
+        
+        # 4. Total Variance (T)
+        # T = W + (1 + 1/M) * B
+        T = W + (1 + 1/n_imputations) * B
+        
+        # 5. Uncertainty (Standard Deviation)
+        uncertainty = np.sqrt(T)
+        
+        # Convert to DataFrames
+        df_imputed = pd.DataFrame(
+            point_estimate,
+            index=self.data_original_.index,
+            columns=self.data_original_.columns
+        )
+        
+        df_uncertainty = pd.DataFrame(
+            uncertainty,
+            index=self.data_original_.index,
+            columns=self.data_original_.columns
+        )
+        
+        if self.verbose:
+            logger.info("Multiple Imputation complete.")
+            logger.info(f"Average uncertainty (std): {np.nanmean(uncertainty):.4f}")
+
+        return df_imputed, df_uncertainty
 
     def _uncertainty_monte_carlo(
         self,

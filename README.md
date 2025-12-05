@@ -50,9 +50,9 @@ df = pd.read_csv("your_data.csv", index_col=0, parse_dates=True)
 imputer = Imputer(data=df, variance_threshold=0.95)
 df_imputed = imputer.fit_transform()
 
-# With uncertainty estimation  
-df_imputed, uncertainty = imputer.fit_transform(return_uncertainty=True)
-print(f"RMSE: {uncertainty['rmse']:.3f} ± {uncertainty['rmse_std']:.3f}")
+# With uncertainty estimation (Multiple Imputation)
+df_imputed, df_uncertainty = imputer.fit_transform(return_uncertainty=True, n_imputations=10)
+print(f"Average uncertainty: {df_uncertainty.mean().mean():.3f}")
 ```
 
 > **Note**: The `Imputer` class uses a data-centric design where data is provided at initialization and preprocessed once. This ensures consistency across all analyses and eliminates redundant preprocessing operations.
@@ -71,9 +71,9 @@ imputer = Imputer(data=df, rank="auto")
 imputer.fit()
 print(f"Optimized rank: {imputer.rank_}")
 
-# With uncertainty estimation
-df_imputed, uncertainty = imputer.fit_transform(return_uncertainty=True)
-print(f"RMSE: {uncertainty['rmse']:.3f} ± {uncertainty['rmse_std']:.3f}")
+# With uncertainty estimation (Multiple Imputation)
+df_imputed, df_uncertainty = imputer.fit_transform(return_uncertainty=True, n_imputations=10)
+# df_uncertainty contains standard deviations for each imputed value
 
 # Advanced: model diagnostics
 residuals, stats = imputer.calculate_reconstruction_residuals(return_stats=True)
@@ -107,7 +107,7 @@ The algorithm performs iterative SVD imputation with automatic rank estimation:
 1. **Preprocessing**: Data validation, standardization, and missing value handling
 2. **Rank Estimation**: Variance threshold, cross-validation, or fixed rank
 3. **SVD Imputation**: Iterative low-rank approximation until convergence
-4. **Uncertainty Estimation**: Monte Carlo validation with temporal or random masking
+4. **Uncertainty Estimation**: Multiple Imputation (Stochastic SVD) or Monte Carlo validation
 
 ## API Reference
 
