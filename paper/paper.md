@@ -21,7 +21,7 @@ bibliography: paper.bib
 
 # Summary
 
-Time series data from environmental monitoring networks and scientific instruments frequently contain gaps due to equipment failures, maintenance periods, or transmission errors. `svd_imputer` is a Python package that imputes missing values in multivariate time series using Singular Value Decomposition (SVD). The package exploits spatial and temporal correlations across multiple series through robust preprocessing, data augmentation techniques, Monte Carlo uncertainty quantification, and automatic rank estimation, while following scikit-learn conventions for easy workflow integration.
+Time series data from environmental monitoring networks and scientific instruments frequently contain gaps due to equipment failures, maintenance periods, or transmission errors. `svd_imputer` is a Python package that imputes missing values in multivariate time series using Singular Value Decomposition (SVD). The package exploits spatial and temporal correlations across multiple series through robust preprocessing, data augmentation techniques, uncertainty quantification via Multiple Imputation, and automatic rank estimation, while following scikit-learn conventions for easy workflow integration.
 
 # Statement of need
 
@@ -33,7 +33,7 @@ Matrix completion methods based on low-rank approximations offer a middle ground
 
 - **Scikit-learn-compatible API** [@pedregosa2011scikit] for seamless workflow integration
 - **Automatic rank estimation** via variance thresholds or cross-validation
-- **Monte Carlo uncertainty quantification** with multiple masking strategies
+- **Uncertainty quantification** via Multiple Imputation and Rubin's Rules
 
 The package targets practitioners working with environmental monitoring data where uncertainty quantification is essential. While similar functionality exists in R packages [@amelia; @buuren2011mice], Python implementations with comparable features have been lacking.
 
@@ -81,14 +81,48 @@ Three methods for rank selection:
 
 ## Uncertainty Quantification
 
-Monte Carlo validation estimates imputation uncertainty [@efron1979bootstrap]:
+The package provides two complementary approaches for uncertainty quantification:
 
-1. Mask observed values (10% default)
-2. Impute artificially missing values
-3. Compute error metrics against true values
-4. Repeat to build error distributions
+1.  **Multiple Imputation (Stochastic SVD)**: Generates element-wise uncertainty intervals for missing values using Rubin's Rules [@rubin1987multiple]. This method injects Gaussian noise based on residual variance during the iterative process to create multiple independent imputations, capturing both model and missing data uncertainty.
 
-Two masking strategies simulate different failure modes: random selection and temporal blocks.
+    **The Stochastic Algorithm**:
+    The standard SVD update loop is modified to include a stochastic step.
+    
+    - **Residual Estimation**: At each iteration, calculate the variance of the error on the observed data points $\Omega$:
+      $$\hat{\sigma}^2 = \frac{1}{| \Omega |} \sum_{(i,j) \in \Omega} (X_{obs, ij} - (U \Sigma V^T)_{ij})^2$$
+    
+    - **Stochastic Imputation**: Fill missing entries $(i, j)$ with the prediction plus random noise drawn from the residual distribution:
+      $$X_{new, ij} = (U \Sigma V^T)_{ij} + \mathcal{N}(0, \hat{\sigma}^2)$$
+    
+    This process is repeated to generate $M$ independent completed matrices.
+
+    **Aggregation (Rubin's Rules)**:
+    The $M$ completed matrices are aggregated to obtain the final estimate and uncertainty bound:
+    
+    - **Final Point Estimate** ($\bar{\theta}$): The average of the $M$ imputed values.
+      $$\bar{\theta} = \frac{1}{M} \sum_{m=1}^M \hat{\theta}_m$$
+    
+    - **Total Variance** ($T$): Combines the Within-Imputation Variance ($W$, average noise level) and Between-Imputation Variance ($B$, variance across datasets):
+      $$T = W + \left(1 + \frac{1}{M}\right)B$$
+      where $W = \frac{1}{M} \sum_{m=1}^M \hat{\sigma}^2_m$ and $B = \frac{1}{M-1} \sum_{m=1}^M (\hat{\theta}_m - \bar{\theta})^2$.
+
+2.  **Monte Carlo Validation**: Estimates global reconstruction error (RMSE, MAE) by repeatedly masking a subset of observed values and imputing them [@efron1979bootstrap]. This approach is primarily used for model validation and automatic rank selection via cross-validation.
+
+    **The Validation Algorithm**:
+    For each repetition $k=1 \dots K$:
+    
+    - **Masking**: Generate a test set $\Omega^{(k)}_{test}$ by hiding a fraction $f$ (e.g., 10%) of the originally observed values $\Omega$.
+      - *Random Strategy*: Indices are selected uniformly at random.
+      - *Block Strategy*: Contiguous temporal blocks are selected to simulate sensor outages.
+      
+    - **Imputation**: Apply the deterministic SVD imputer to the masked dataset to obtain the reconstruction $\hat{X}^{(k)}$.
+    
+    - **Error Calculation**: Compute the discrepancy between the imputed values and the ground truth for the masked entries:
+      $$RMSE_k = \sqrt{\frac{1}{|\Omega^{(k)}_{test}|} \sum_{(i,j) \in \Omega^{(k)}_{test}} (X_{ij} - \hat{X}^{(k)}_{ij})^2}$$
+
+    **Aggregation**:
+    The final performance metric is the average error over all $K$ repetitions, providing a robust estimate of the model's generalization capability:
+    $$RMSE_{total} = \frac{1}{K} \sum_{k=1}^K RMSE_k$$
 
 # Example Usage
 
@@ -114,14 +148,20 @@ df_aug = create_derivative_augmented_matrix(df)
 imputer_aug = Imputer(data=df_aug, variance_threshold=0.95)
 df_aug_imputed = imputer_aug.fit_transform()
 
-# With uncertainty quantification  
-df_imputed, uncertainty = imputer.fit_transform(
+# 1. Multiple Imputation (for element-wise uncertainty)
+df_imputed, df_uncertainty = imputer.fit_transform(
     return_uncertainty=True,
-    n_repeats=100,
+    n_imputations=10
+)
+print(f"Average uncertainty: {df_uncertainty.mean().mean():.3f}")
+
+# 2. Monte Carlo Validation (for global error estimation)
+imputer.fit()
+validation_results = imputer.estimate_uncertainty(
+    n_repeats=100, 
     mask_strategy='block'
 )
-
-print(f"RMSE: {uncertainty['rmse']:.3f}")
+print(f"Estimated RMSE: {validation_results['RMSE']['mean']:.3f}")
 ```
 
 The augmentation functions enable users to leverage temporal patterns for improved imputation accuracy in time series with strong sequential dependencies.
@@ -148,7 +188,7 @@ Existing imputation packages have limitations:
 - **Amelia** [@amelia] (R): Uncertainty estimation but limited model assumptions  
 - **mice** [@buuren2011mice] (R): Comprehensive but computationally intensive
 
-`svd_imputer` combines efficient SVD imputation, automatic rank selection, Monte Carlo uncertainty quantification, and a scikit-learn-compatible API in a single package.
+`svd_imputer` combines efficient SVD imputation, automatic rank selection, Multiple Imputation for uncertainty quantification, and a scikit-learn-compatible API in a single package.
 
 # Acknowledgements
 
