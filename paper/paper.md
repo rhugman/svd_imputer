@@ -21,33 +21,39 @@ bibliography: paper.bib
 
 # Summary
 
-Time series data from environmental monitoring networks and scientific instruments frequently contain gaps due to equipment failures, maintenance periods, or transmission errors. `svd_imputer` is a Python package that imputes missing values in multivariate time series using Singular Value Decomposition (SVD). The package implements an Expectation-Maximization (EM) workflow to iteratively fill in missing data with an optimal low-rank approximation. Multiple imputation and bootstrap workflows are implemented to estimate imputation uncertainty. The package provides an easy to use and computationaly frugal tool for filling time series data gaps.
+Time series data from environmental monitoring networks and scientific instruments frequently contain gaps due to equipment failures, maintenance periods, or transmission errors. `svd_imputer` is a Python package that imputes missing values in multivariate time series using Singular Value Decomposition (SVD). The package implements an Expectation-Maximization (EM) workflow to iteratively fill in missing data with an optimal low-rank approximation. Multiple imputation and bootstrap workflows are implemented to estimate imputation uncertainty. The package provides an easy-to-use and computationally frugal tool for filling time series data gaps.
 
-# Statement of need
+# Statement of Need
 
-Data gaps in monitored envirnomental variables can pose chalenges for hydrological and hydrogeologicl studies. For example:
- - Calculation of long-term drought indices often require regular samples, and can be affected by data gaps during extreme periods (e.g., droughts and floods).
- - Interpolating spatial distributions require data during the same period.
- - Numerical model boundary conditions often rely on spatio-temporal varying inputs, interpolated between monitorined locations.
+Data gaps in monitored environmental variables can pose challenges for hydrological and hydrogeological studies. For example:
+ - Calculation of long-term drought indices often requires regular samples and can be affected by data gaps during extreme periods (e.g., droughts and floods).
+ - Interpolating spatial distributions requires data during the same period.
+ - Numerical model boundary conditions often rely on spatio-temporally varying inputs interpolated between monitored locations.
 
 Broadly, these challenges stem from the inherent inconsistency of distributed monitoring networks. Raw environmental observations are frequently fragmented, varying in duration, continuity, and measurement quality. Because the accurate representation of physical processes (such as river–aquifer interaction) depends on a seamless spatio-temporal distribution of data, a systematic preprocessing and data harmonization phase is often a prerequisite for analysis.
 
-Where time series gaps affect the outcomes of an analysis, robust approaches to filling the gaps and estimating the uncertainty of the filling method are required. Recently, [@burcet2025iah] introduced an SVD-based workflow specifically designed for this purpose.
+Where time series gaps affect the outcomes of an analysis, robust approaches to filling the gaps and estimating the uncertainty of the filling method are required. Recently, @burcet2025iah introduced an SVD-based workflow specifically designed for this purpose. 
 
 The underlying principle of this method is to extract the relationships between high-quality measurements across different monitoring stations to fill missing records or replace low-quality data based on those extracted dependencies. This is implemented by iteratively applying Singular Value Decomposition (SVD) to a matrix representing variable magnitudes (such as fluxes or levels) per date.
 
-From the SVD factorization, a low-rank approximation of the data for all stations and times is calculated. This approximation effectively filters out localized noise and preserves only the dominant spatio-temporal trends that best represent the monitoring network as a whole. Finally, this low-rank structure is used to impute missing values and replace erroneous records, ensuring a physically consistent dataset.
-
-Multivariate time series from environmental monitoring networks often exhibit strong spatial and temporal correlations, meaning the underlying data matrix is frequently low-rank. Traditional univariate imputation methods ignore these cross-series relationships and provide no uncertainty estimates [@hastie2009elements]. While sophisticated machine learning approaches exist [@stekhoven2012missforest], they often require extensive hyperparameter tuning and substantial computational resources.
+Multivariate time series from environmental monitoring networks often exhibit strong spatial and temporal correlations, meaning the underlying data matrix is frequently low-rank. Traditional univariate imputation methods ignore these cross-series relationships and provide no uncertainty estimates [@hastie2009elements]. While sophisticated machine learning approaches exist [@stekhoven2012missforest], they often require hyperparameter tuning and more extensive computational resources.
 
 Matrix completion methods based on low-rank approximations offer a middle ground: they exploit correlations between series while remaining computationally efficient [@candes2010matrix; @mazumder2010spectral]. While `scikit-learn` [@pedregosa2011scikit] provides `IterativeImputer`, it lacks a native SVD-based engine optimized for the rank-deficient matrices common in environmental data and does not natively provide robust uncertainty quantification.
 
-
-The `svd_imputer` package implements the workflow introduced by [@burcet2025iah], extends it to include uncertainty quantification abd addresses limitations in existing Python implementations by providing:
+The `svd_imputer` package implements the workflow introduced by [@burcet2025iah], extends it to include uncertainty quantification, and addresses limitations in existing Python implementations by providing:
 
 - **Automatic rank estimation** via variance thresholds or cross-validation.
 - **Uncertainty quantification** via Multiple Imputation and Rubin's Rules [@rubin1987multiple], allowing practitioners to propagate imputation error into downstream physical models.
 - **Time-series specific augmentation utilities**, such as lag and derivative features, to capture temporal dynamics within the SVD framework.
+
+### Comparison with Existing Tools
+
+| Feature | `svd_imputer` | `scikit-learn` | `Amelia` (R) | `metan` (R) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Primary Engine** | SVD / EM | MICE / Iterative | EM / Bootstrapping | EM-SVD |
+| **Uncertainty** | Rubin's Rules | No | Yes | No |
+| **Augmentation**| Lag & Derivative | No | No | No |
+| **Language** | Python | Python | R | R (Archived) |
 
 # Implementation
 
@@ -58,12 +64,12 @@ $$\mathbf{X} \approx \mathbf{U}_r \mathbf{\Sigma}_r \mathbf{V}_r^T$$
 where subscript $r$ denotes truncation to rank $r$.
 
 ### The Iterative Algorithm
-1.  **Initialize**: Fill missing entries $(i,j) \notin \Omega$ (where $\Omega$ is the set of observed indices) with column means.
+1.  **Initialize**: Fill missing entries $(i,j) \notin \Omega$ (where $\Omega$ is the set of observed indices) with column means to create $\mathbf{X}^{(0)}$.
 2.  **Iterate until convergence**:
     - Compute SVD of the current matrix: $\mathbf{X}^{(t-1)} = \mathbf{U} \mathbf{\Sigma} \mathbf{V}^T$.
-    - Construct the reconstruction: $\mathbf{X}_{rec} = \mathbf{U}_r \mathbf{\Sigma}_r \mathbf{V}_r^T$.
-    - Update missing entries: $X_{ij}^{(t)} = (X_{rec})_{ij}$ for all $(i,j) \notin \Omega$.
-3.  **Stop**: When $\|\mathbf{X}^{(t)} - \mathbf{X}^{(t-1)}\|_F < \epsilon$.
+    - Construct the low-rank reconstruction: $\mathbf{X}_{rec} = \mathbf{U}_r \mathbf{\Sigma}_r \mathbf{V}_r^T$.
+    - Update only the missing entries: $X_{ij}^{(t)} = (X_{rec})_{ij}$ for all $(i,j) \notin \Omega$, while keeping $X_{ij}^{(t)} = X_{ij}^{(0)}$ for all $(i,j) \in \Omega$.
+3.  **Stop**: When the change in the missing entries stabilizes, defined by the Frobenius norm: $\|\mathbf{X}^{(t)} - \mathbf{X}^{(t-1)}\|_F < \epsilon$.
 
 ### Uncertainty Quantification
 
@@ -74,18 +80,11 @@ where subscript $r$ denotes truncation to rank $r$.
 
 2.  **Monte Carlo Bootstrap-Validation**: Estimates global reconstruction error by repeatedly masking a subset of observed values and imputing them [@efron1979bootstrap]. It supports both "Random" and "Block" masking strategies to simulate sensor outages.
 
-
-
-# Comparison with existing tools
-
-| Feature | `svd_imputer` | `scikit-learn` | `Amelia` (R) | `metan` (R) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Primary Engine** | SVD / EM | MICE / Iterative [@pedregosa2011scikit] | EM / Bootstrapping [@amelia] | EM-SVD [@Olivoto2020] |
-| **Uncertainty** | Rubin's Rules | No | Yes | No |
-| **Augmentation**| Lag & Derivative | No | No | No |
-| **Language** | Python | Python | R | R (Archived) |
-
 # Example Usage
+
+The package is designed using a `scikit-learn` style API, requiring minimal user input. The workflow is handled through the `Imputer` class. The user provides time series data in wide format (i.e., a unique time series per column).
+
+On initialization, data is validated and standardized by default. The user has options on how to determine the SVD rank (manual, variance-based, or through cross-validation). Iterative SVD is undertaken by calling `fit_transform()`. Optionally, uncertainty estimation through multiple imputation can be specified.
 
 ```python
 import pandas as pd
@@ -94,8 +93,8 @@ from svd_imputer import Imputer
 # Load time series data
 df = pd.read_csv('data.csv', index_col=0, parse_dates=True)
 
-# Basic imputation with 95% variance threshold
-imputer = Imputer(data=df, variance_threshold=0.95)
+# Basic imputation with automatic rank estimation
+imputer = Imputer(data=df, rank='auto')
 df_imputed = imputer.fit_transform()
 
 # Multiple Imputation for element-wise uncertainty
@@ -103,12 +102,20 @@ df_imputed, df_std = imputer.fit_transform(
     return_uncertainty=True,
     n_imputations=10
 )
-
-# Monte Carlo Validation for RMSE estimation
-validation = imputer.estimate_uncertainty(n_repeats=50, mask_strategy='block')
-print(f"Estimated RMSE: {validation['RMSE']['mean']:.3f}")
 ```
 
+\autoref{fig:1} shows an example of time series filling for a collection of sites with varying degrees of correlation and data sparsity. The synthetic data and code to generate this figure are included in the augmented_example.ipynb in the examples directory. Note that Series_D is not correlated with any of the others; however, short gaps can be filled by using derivative-based and time-lag data augmentation.
+
+![Caption for example figure.\label{fig:1}](fig1.png)
+
+
+# Final remarks
+
+The `svd_imputer` package offers a streamlined, Python-based workflow designed to bridge the gap between complex matrix completion theory and practical environmental application. By providing a ready-to-use pipeline, it allows practitioners to implement advanced multivariate imputation without the overhead of building custom software architectures.
+
+Beyond simple data filling, the tool’s ability to generate robust error estimates represents a significant step forward for hydrological modeling. In fields where analyses directly inform risk-based decision-making, understanding the reliability of imputed data is just as important as the data itself. `svd_imputer` ensures that this uncertainty is no longer an afterthought but a core component of the data preparation process.
+
+Future improvements include exploring approaches to integrating temporal-covarince in informing imputed values, implementing "round robin" or "sequential imputation" workflows to maximize information gain whilst minizing the inflluence of noise.
 
 # Acknowledgements
 
