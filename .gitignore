@@ -52,3 +52,6 @@ htmlcov/
 
 # Distribution
 *.whl
+
+# Auto-generated version file
+svd_imputer/_version.py
