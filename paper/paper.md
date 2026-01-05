@@ -12,9 +12,17 @@ authors:
   - name: Rui Hugman
     orcid: 0000-0003-0891-3886
     affiliation: 1
+  - name: Marti Burcet
+    orcid: 0000-0002-7422-3368
+    affiliation: 2
+  - name: Tao Cui
+    orcid: 0000-0001-9853-9423
+    affiliation: 2
 affiliations:
  - name: INTERA, Portugal
    index: 1
+ - name: Office of Groundwater Impact Assessment, Brisbane, QLD, Australia
+   index: 2   
 date: 12 November 2025
 bibliography: paper.bib
 ---
@@ -60,14 +68,14 @@ The `svd_imputer` package implements the workflow introduced by [@burcet2025iah]
 `svd_imputer` implements iterative SVD imputation for matrix completion [@troyanskaya2001missing; @mazumder2010spectral]. Data is represented as a matrix $\mathbf{X} \in \mathbb{R}^{n \times p}$, where $n$ represents time entries and $p$ represents monitored sites.
 
 The algorithm assumes $\mathbf{X}$ can be approximated by a low-rank matrix:
-$$\mathbf{X} \approx \mathbf{U}_r \mathbf{\Sigma}_r \mathbf{V}_r^T$$
+$$\mathbf{X} \approx \mathbf{U}_r \boldsymbol{\Sigma}_r \mathbf{V}_r^T$$
 where subscript $r$ denotes truncation to rank $r$.
 
 ### The Iterative Algorithm
 1.  **Initialize**: Fill missing entries $(i,j) \notin \Omega$ (where $\Omega$ is the set of observed indices) with column means to create $\mathbf{X}^{(0)}$.
 2.  **Iterate until convergence**:
-    - Compute SVD of the current matrix: $\mathbf{X}^{(t-1)} = \mathbf{U} \mathbf{\Sigma} \mathbf{V}^T$.
-    - Construct the low-rank reconstruction: $\mathbf{X}_{rec} = \mathbf{U}_r \mathbf{\Sigma}_r \mathbf{V}_r^T$.
+    - Compute SVD of the current matrix: $\mathbf{X}^{(t-1)} = \mathbf{U} \boldsymbol{\Sigma} \mathbf{V}^T$.
+    - Construct the low-rank reconstruction: $\mathbf{X}_{rec} = \mathbf{U}_r \boldsymbol{\Sigma}_r \mathbf{V}_r^T$.
     - Update only the missing entries: $X_{ij}^{(t)} = (X_{rec})_{ij}$ for all $(i,j) \notin \Omega$, while keeping $X_{ij}^{(t)} = X_{ij}^{(0)}$ for all $(i,j) \in \Omega$.
 3.  **Stop**: When the change in the missing entries stabilizes, defined by the Frobenius norm: $\|\mathbf{X}^{(t)} - \mathbf{X}^{(t-1)}\|_F < \epsilon$.
 
@@ -76,9 +84,11 @@ where subscript $r$ denotes truncation to rank $r$.
 1.  **Multiple Imputation (Stochastic SVD)**: This method injects Gaussian noise based on residual variance during the iterative process. 
     - At each iteration, the residual variance $\hat{\sigma}^2$ is calculated from observed data points $\Omega$.
     - Missing entries are updated as $X_{new, ij} = (X_{rec})_{ij} + \mathcal{N}(0, \hat{\sigma}^2)$.
-    - Following [@rubin1987multiple], $M$ independent completed matrices are aggregated to calculate the final point estimate ($\bar{\theta}$) and Total Variance ($T$), which accounts for both within-imputation and between-imputation variance.
+    - Following [@rubin1987multiple], a set of $M$ independent completed matrices (where $M$ is the number of imputations) is aggregated to calculate the final point estimate ($\bar{\theta}$) and Total Variance ($T$), which accounts for both within-imputation and between-imputation variance.
 
 2.  **Monte Carlo Bootstrap-Validation**: Estimates global reconstruction error by repeatedly masking a subset of observed values and imputing them [@efron1979bootstrap]. It supports both "Random" and "Block" masking strategies to simulate sensor outages.
+
+3.  **Monte Carlo Bootstrap-Validation**: Estimates global reconstruction error by repeatedly masking a subset of observed values and imputing them [@efron1979bootstrap]. It supports both "Random" and "Block" masking strategies to simulate sensor outages.
 
 # Example Usage
 
@@ -104,9 +114,9 @@ df_imputed, df_std = imputer.fit_transform(
 )
 ```
 
-\autoref{fig:1} shows an example of time series filling for a collection of sites with varying degrees of correlation and data sparsity. The synthetic data and code to generate this figure are included in the augmented_example.ipynb in the examples directory. Note that Series_D is not correlated with any of the others; however, short gaps can be filled by using derivative-based and time-lag data augmentation.
+\autoref{fig:1} illustrates the imputer's performance across four synthetic sites with varying correlation structures. The `truth` (solid black) represents the held-back data, while the `imputed` values (dashed red) fill the gaps created for validation solely based on SVD using the `input` data (blue dots). The shaded grey region represents the 95% confidence interval, derived from $M=10$ imputations using Rubin’s Rules to account for both model and residual uncertainty. Note that for Series_D, which lacks correlation with other sites, the gap is successfully recovered using derivative-based and time-lag data augmentation.
 
-![Caption for example figure.\label{fig:1}](fig1.png)
+![Demonstration of SVD-based imputation. The truth (black) is compared against imputed values (dashed red). The shaded area denotes the 95% confidence interval calculated via Rubin’s Rules, propagating uncertainty from multiple stochastic SVD iterations.\label{fig:1}](fig1.png)
 
 
 # Final remarks
@@ -119,7 +129,7 @@ Future improvements include exploring approaches to integrating temporal-covarin
 
 # Acknowledgements
 
-We thank the open-source community for feedback on early versions of this package.
+We thank the JOSS editors and reviewers for their constructive comments improving both the package and paper. 
 
 
 
