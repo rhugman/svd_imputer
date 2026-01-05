@@ -108,9 +108,9 @@ df_imputed, df_std = imputer.fit_transform(
 )
 ```
 
-\autoref{fig:1} shows an example of time series filling for a collection of sites with varying degrees of correlation and data sparsity. The synthetic data and code to generate this figure are included in the augmented_example.ipynb in the examples directory. Note that Series_D is not correlated with any of the others; however, short gaps can be filled by using derivative-based and time-lag data augmentation.
+\autoref{fig:1} illustrates the imputer's performance across four synthetic sites with varying correlation structures. The `truth` (solid black) represents the held-back data, while the `imputed` values (dashed red) fill the gaps created for validation solely based on SVD using the `input` data (blue dots). The shaded grey region represents the 95% confidence interval, derived from $M=10$ imputations using Rubin’s Rules to account for both model and residual uncertainty. Note that for Series_D, which lacks correlation with other sites, the gap is successfully recovered using derivative-based and time-lag data augmentation.
 
-![Caption for example figure.\label{fig:1}](fig1.png)
+![Demonstration of SVD-based imputation. The truth (black) is compared against imputed values (dashed red). The shaded area denotes the 95% confidence interval calculated via Rubin’s Rules, propagating uncertainty from multiple stochastic SVD iterations.\label{fig:1}](fig1.png)
 
 
 # Final remarks
