@@ -81,8 +81,6 @@ where subscript $r$ denotes truncation to rank $r$.
 
 ### Uncertainty Quantification
 
-### Uncertainty Quantification
-
 1.  **Multiple Imputation (Stochastic SVD)**: This method injects Gaussian noise based on residual variance during the iterative process. 
     - At each iteration, the residual variance $\hat{\sigma}^2$ is calculated from observed data points $\Omega$.
     - Missing entries are updated as $X_{new, ij} = (X_{rec})_{ij} + \mathcal{N}(0, \hat{\sigma}^2)$.
@@ -90,7 +88,7 @@ where subscript $r$ denotes truncation to rank $r$.
 
 2.  **Monte Carlo Bootstrap-Validation**: Estimates global reconstruction error by repeatedly masking a subset of observed values and imputing them [@efron1979bootstrap]. It supports both "Random" and "Block" masking strategies to simulate sensor outages.
 
-2.  **Monte Carlo Bootstrap-Validation**: Estimates global reconstruction error by repeatedly masking a subset of observed values and imputing them [@efron1979bootstrap]. It supports both "Random" and "Block" masking strategies to simulate sensor outages.
+3.  **Monte Carlo Bootstrap-Validation**: Estimates global reconstruction error by repeatedly masking a subset of observed values and imputing them [@efron1979bootstrap]. It supports both "Random" and "Block" masking strategies to simulate sensor outages.
 
 # Example Usage
 
