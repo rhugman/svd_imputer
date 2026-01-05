@@ -227,17 +227,28 @@ def standardize_columns(X):
 
 
 def preprocess_for_svd(data):
-    """Full preprocessing pipeline"""
+    """
+    Prepare data for SVD imputation by standardizing columns.
+
+    Parameters
+    ----------
+    data : pd.DataFrame or np.ndarray
+        Input data.
+
+    Returns
+    -------
+    tuple
+        (standardized_data, (means, stds))
+    """
     if isinstance(data, pd.DataFrame):
         X = data.copy().values.astype(float)
     elif isinstance(data, np.ndarray):
         X = data.copy().astype(float)
 
-    # 2. Standardize (always good)
+    # Standardize data
     X_std, means, stds = standardize_columns(X)
 
-    # 3. PRESERVE missing values - don't fill them yet!
-    # The iterative SVD algorithm will handle the missing values
+    # Preserve missing values for the iterative SVD algorithm
     if isinstance(data, pd.DataFrame):
         X_std = pd.DataFrame(X_std, columns=data.columns, index=data.index)
 
@@ -248,7 +259,7 @@ def postprocess_after_svd(X_imputed, preprocessing_info):
     """Reverse preprocessing"""
     means, stds = preprocessing_info
 
-    # 1. Unstandardize
+    # Unstandardize data
     X = X_imputed * stds + means
 
     return X
