@@ -131,7 +131,7 @@ Future improvements include exploring approaches to integrating temporal-covarin
 
 # Acknowledgements
 
-We thank the open-source community for feedback on early versions of this package.
+We thank the JOSS editors and reviewers for their constructive comments improving both the package and paper. 
 
 
 
