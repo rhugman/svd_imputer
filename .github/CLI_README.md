@@ -1,139 +1,80 @@
 # CI/CD Pipeline Documentation
 
-This document describes the comprehensive GitHub Actions CI/CD pipeline implemented for the SVD Imputer project.
+This document describes the GitHub Actions CI/CD pipeline implemented for the SVD Imputer project.
 
 ## Overview
 
 The CI/CD pipeline provides:
-- ✅ **Multi-OS, Multi-Python Testing**: Ubuntu, Windows, macOS × Python 3.8-3.12
-- 🔍 **Code Quality**: Black, isort, flake8, mypy, pydocstyle
-- 🔒 **Security Scanning**: Bandit, Safety, pip-audit, Semgrep, secret scanning
-- 📚 **Documentation**: Automated building and deployment to GitHub Pages
-- 📦 **Release Management**: Automated PyPI publishing with testing
-- ⚡ **Performance Monitoring**: Benchmark tracking and memory profiling
-- 🧪 **Comprehensive Testing**: Unit, integration, and performance tests
+- ✅ **Automated Testing**: Fast feedback on every push/PR (Ubuntu × Python 3.9, 3.11, 3.12).
+- 📦 **Release Management**: Comprehensive multi-platform testing and automated PyPI publishing on release tags.
+- 📄 **Paper Generation**: Automated PDF generation for the project paper.
+- 🛠 **Local Development Tools**: `Makefile` integration for code quality, security scanning, and documentation.
 
 ## Workflows
 
 ### 1. Main CI Workflow (`.github/workflows/ci.yml`)
 
-**Triggers:** Push/PR to main/develop branches, scheduled weekly runs, manual dispatch
+**Triggers:** Push/PR to main/develop branches, workflow calls.
 
 **Jobs:**
-- **Code Quality**: Black formatting, isort, flake8 linting, mypy type checking, bandit security
-- **Test Matrix**: Tests across 3 OS × 5 Python versions (with smart exclusions)
-- **Performance**: Benchmark tests with historical tracking
-- **Documentation**: Build validation and artifact generation
-- **Package Build**: Test package building and validation
-- **Security**: Dependency vulnerability scanning
+- **Test**: Runs `pytest` with coverage on Ubuntu-latest across Python 3.9, 3.11, and 3.12.
 
 **Key Features:**
-- Fail-fast disabled for comprehensive testing
-- Coverage reporting with Codecov integration
-- Parallel execution for efficiency
-- Artifact preservation for debugging
+- Fast execution for rapid feedback.
+- Coverage reporting with `pytest-cov`.
+- Verifies package installation.
 
-### 2. Documentation Workflow (`.github/workflows/docs.yml`)
+### 2. Release Workflow (`.github/workflows/release.yml`)
 
-**Triggers:** Push/PR affecting docs, manual dispatch
-
-**Jobs:**
-- **Docs Build**: Sphinx documentation generation with multiple themes
-- **GitHub Pages Deploy**: Automatic deployment to GitHub Pages (main branch only)
-- **Quality Checks**: RST syntax, doc8 style checking, docstring coverage
-- **Documentation Coverage**: API coverage analysis with badge generation
-
-**Features:**
-- Automatic API documentation generation with `sphinx-apidoc`
-- Link checking for external references
-- Multiple output formats (HTML, PDF ready)
-- Documentation coverage metrics
-
-### 3. Security Workflow (`.github/workflows/security.yml`)
-
-**Triggers:** Push/PR to main/develop, weekly scheduled scans, manual dispatch
+**Triggers:** Version tags (v*), manual dispatch.
 
 **Jobs:**
-- **Static Analysis**: Bandit, Semgrep, code quality security checks
-- **Dependency Scanning**: Safety, pip-audit, OWASP Dependency Check
-- **Secret Scanning**: TruffleHog for exposed secrets
-- **License Compliance**: License compatibility checking
-- **Container Security**: Trivy scanning (when Docker support added)
+- **Validation**: Checks version format and changelog presence.
+- **Full Testing**: Runs the Main CI suite.
+- **Package Building**: Builds source (sdist) and wheel distributions.
+- **Installation Testing**: Validates installation on **Ubuntu, Windows, and macOS** across Python 3.8, 3.11, and 3.12.
+- **GitHub Release**: Creates a GitHub release with auto-generated notes.
+- **PyPI Publishing**: Publishes to PyPI (if not a dry run).
 
 **Features:**
-- SARIF report generation for GitHub Security tab
-- Automated security issue creation for scheduled scans
-- Comprehensive security reporting with artifacts
-- Integration with GitHub Advanced Security features
+- Multi-OS, Multi-Python verification before publishing.
+- Automated release notes generation.
+- Artifact verification.
 
-### 4. Release Workflow (`.github/workflows/release.yml`)
+### 3. Draft PDF Workflow (`.github/workflows/draft-pdf.yml`)
 
-**Triggers:** Version tags (v*), manual dispatch with version bump options
+**Triggers:** Push to any branch.
 
 **Jobs:**
-- **Validation**: Prerequisites checking, version validation
-- **Full Testing**: Complete CI suite execution before release
-- **Package Building**: Source and wheel distribution creation
-- **Installation Testing**: Multi-platform installation validation
-- **GitHub Release**: Automated release creation with changelog
-- **Test PyPI**: Publishing to Test PyPI for validation
-- **PyPI Publishing**: Production release to PyPI
-- **Post-Release**: Cleanup and notification tasks
-
-**Features:**
-- Semantic version validation
-- Automated changelog generation
-- Multi-stage release process with validation
-- Rollback capabilities
-- Post-release task tracking
+- **Paper Draft**: Builds a PDF version of the paper (`paper/paper.md`) using `openjournals/openjournals-draft-action`.
+- **Artifacts**: Uploads the generated PDF as a workflow artifact.
 
 ## Configuration Files
 
-### Code Quality Configuration
+### Code Quality & Project Configuration
 
 **`pyproject.toml`** - Main configuration file:
-- Black formatting settings (127 char line length)
-- isort import sorting configuration
-- Coverage reporting settings
-- Bandit security configuration
-- MyPy type checking settings
+- Project metadata and dependencies.
+- Black formatting settings.
+- Tool configurations (setuptools_scm, etc.).
 
 **`setup.cfg`** - Additional tool configuration:
-- Pytest test discovery and execution settings
-- Flake8 linting rules and exclusions
-- Coverage reporting options
-- MyPy type checking overrides
-
-**`.pre-commit-config.yaml`** - Pre-commit hooks:
-- Automated code formatting on commit
-- Linting checks before commits
-- Security scanning integration
-- Documentation validation
-
-### Testing Configuration
-
-**`tox.ini`** - Multi-environment testing:
-- Python version matrix testing
-- Isolated environment testing
-- Specialized test environments (lint, docs, security)
-- GitHub Actions integration mapping
+- Flake8 linting rules.
 
 **`requirements-dev.txt`** - Development dependencies:
-- Testing frameworks (pytest, coverage)
-- Code quality tools (black, isort, flake8, mypy)
-- Security tools (bandit, safety, pip-audit)
-- Documentation tools (sphinx, themes)
-- Build and release tools
+- Testing frameworks (pytest, coverage).
+- Code quality tools (black, isort, flake8, mypy).
+- Security tools (bandit, safety, pip-audit).
+- Documentation tools (sphinx).
 
 ### Development Tools
 
 **`Makefile`** - Common development tasks:
-- Quick setup and installation commands
-- Testing shortcuts (fast, slow, integration)
-- Code quality checks and formatting
-- Documentation building and serving
-- Release preparation and publishing
-- CI simulation for local testing
+- **Testing**: `make test`, `make test-all`, `make test-fast`.
+- **Quality**: `make lint` (runs black, isort, flake8, mypy, pydocstyle).
+- **Formatting**: `make format` (runs black, isort).
+- **Security**: `make security` (runs bandit, safety, pip-audit).
+- **Docs**: `make docs` (builds Sphinx documentation).
 
 ## Usage Guide
 
@@ -166,15 +107,11 @@ The CI/CD pipeline provides:
 ### For CI/CD
 
 **Automatic Triggers:**
-- **Push to main/develop**: Full CI suite + documentation deployment
-- **Pull Requests**: Full testing and validation
-- **Version tags**: Complete release process
-- **Weekly**: Security scans and dependency updates
+- **Push to main/develop**: Runs Main CI (tests).
+- **Version tags (v*)**: Triggers the full Release pipeline.
 
 **Manual Triggers:**
-- Workflow dispatch for any workflow
-- Release workflow with version bump options
-- Security scans on-demand
+- **Release Workflow**: Can be manually triggered to test the release process or publish with specific options.
 
 ### Release Process
 
@@ -187,103 +124,24 @@ The CI/CD pipeline provides:
 2. **Manual with Workflow Dispatch:**
    - Go to Actions → Release & Publish
    - Click "Run workflow"
-   - Select version bump type (patch/minor/major)
-   - Optionally enable dry-run mode
+   - Select version bump type and dry-run options.
 
 ## Security Features
 
 ### Secrets Management
-Required secrets for full functionality:
-- `PYPI_API_TOKEN`: PyPI publishing (production)
-- `TEST_PYPI_API_TOKEN`: Test PyPI publishing
-- `CODECOV_TOKEN`: Coverage reporting (optional but recommended)
-- `NVD_API_KEY`: Enhanced dependency vulnerability scanning
+Required secrets for release functionality:
+- `PYPI_API_TOKEN`: PyPI publishing.
 
 ### Security Scanning
-- **Daily**: Dependency vulnerability scanning
-- **Weekly**: Comprehensive security suite
-- **PR/Push**: Basic security checks
-- **Continuous**: Secret scanning on all commits
-
-### Compliance
-- License compatibility checking
-- SBOM (Software Bill of Materials) generation
-- SARIF security report integration
-- Automated vulnerability reporting
-
-## Performance Monitoring
-
-### Benchmarks
-- **Execution Time**: Performance regression detection
-- **Memory Usage**: Memory leak and efficiency monitoring  
-- **Scaling**: Performance across different data sizes
-- **Comparison**: Method performance comparisons
-
-### Monitoring
-- Historical benchmark tracking
-- Performance regression alerts
-- Memory profiling reports
-- Scalability analysis
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Test Failures:**
-   - Check specific OS/Python version combinations
-   - Review test artifacts for detailed logs
-   - Run `make test-all` locally to reproduce
-
-2. **Security Alerts:**
-   - Review security scan artifacts
-   - Update dependencies: `pip install -U -r requirements-dev.txt`
-   - Check bandit configuration for false positives
-
-3. **Documentation Failures:**
-   - Validate RST syntax: `make docs`
-   - Check for broken links in artifacts
-   - Ensure all docstrings follow NumPy convention
-
-4. **Release Issues:**
-   - Verify version tag format (v1.2.3)
-   - Check that all CI tests pass
-   - Ensure secrets are properly configured
-
-### Performance Optimization
-
-The pipeline is optimized for:
-- **Parallel execution** where possible
-- **Smart caching** of dependencies
-- **Selective testing** with exclusion matrices
-- **Artifact reuse** between jobs
-- **Fail-fast disabled** for comprehensive feedback
-
-### Monitoring and Alerts
-
-- GitHub Actions status badges in README
-- Codecov integration for coverage tracking
-- Security alerts through GitHub Advanced Security
-- Performance regression detection
-- Automated issue creation for failures
-
-## Future Enhancements
-
-Planned improvements:
-- Container-based testing with Docker
-- Integration with external code quality services
-- Advanced performance profiling
-- Multi-language support preparation
-- Enhanced release automation
-- Dependency update automation (Dependabot integration)
+Security checks are configured for local execution via `make security`. This runs:
+- **Bandit**: Common security issues in Python code.
+- **Safety**: Checks installed dependencies for known vulnerabilities.
+- **Pip-audit**: Audits Python environments for packages with known vulnerabilities.
 
 ## Contributing
 
 When contributing to the CI/CD pipeline:
 
-1. Test changes locally with `make ci-local`
-2. Update documentation for new features
-3. Follow the existing workflow patterns
-4. Add appropriate error handling
-5. Include monitoring and alerting where appropriate
-
-For questions or issues with the CI/CD pipeline, please create an issue with the `ci/cd` label.
+1. Test changes locally with `make ci-local`.
+2. Update documentation if workflows change.
+3. Ensure `Makefile` targets remain functional as they drive local development.
