@@ -12,9 +12,17 @@ authors:
   - name: Rui Hugman
     orcid: 0000-0003-0891-3886
     affiliation: 1
+  - name: Marti Burcet
+    orcid: 0000-0002-7422-3368
+    affiliation: 2
+  - name: Tao Cui
+    orcid: 0000-0001-9853-9423
+    affiliation: 2
 affiliations:
  - name: INTERA, Portugal
    index: 1
+ - name: Office of Groundwater Impact Assessment, Brisbane, QLD, Australia
+   index: 2   
 date: 12 November 2025
 bibliography: paper.bib
 ---
