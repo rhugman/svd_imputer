@@ -60,14 +60,14 @@ The `svd_imputer` package implements the workflow introduced by [@burcet2025iah]
 `svd_imputer` implements iterative SVD imputation for matrix completion [@troyanskaya2001missing; @mazumder2010spectral]. Data is represented as a matrix $\mathbf{X} \in \mathbb{R}^{n \times p}$, where $n$ represents time entries and $p$ represents monitored sites.
 
 The algorithm assumes $\mathbf{X}$ can be approximated by a low-rank matrix:
-$$\mathbf{X} \approx \mathbf{U}_r \mathbf{\Sigma}_r \mathbf{V}_r^T$$
+$$\mathbf{X} \approx \mathbf{U}_r \boldsymbol{\Sigma}_r \mathbf{V}_r^T$$
 where subscript $r$ denotes truncation to rank $r$.
 
 ### The Iterative Algorithm
 1.  **Initialize**: Fill missing entries $(i,j) \notin \Omega$ (where $\Omega$ is the set of observed indices) with column means to create $\mathbf{X}^{(0)}$.
 2.  **Iterate until convergence**:
-    - Compute SVD of the current matrix: $\mathbf{X}^{(t-1)} = \mathbf{U} \mathbf{\Sigma} \mathbf{V}^T$.
-    - Construct the low-rank reconstruction: $\mathbf{X}_{rec} = \mathbf{U}_r \mathbf{\Sigma}_r \mathbf{V}_r^T$.
+    - Compute SVD of the current matrix: $\mathbf{X}^{(t-1)} = \mathbf{U} \boldsymbol{\Sigma} \mathbf{V}^T$.
+    - Construct the low-rank reconstruction: $\mathbf{X}_{rec} = \mathbf{U}_r \boldsymbol{\Sigma}_r \mathbf{V}_r^T$.
     - Update only the missing entries: $X_{ij}^{(t)} = (X_{rec})_{ij}$ for all $(i,j) \notin \Omega$, while keeping $X_{ij}^{(t)} = X_{ij}^{(0)}$ for all $(i,j) \in \Omega$.
 3.  **Stop**: When the change in the missing entries stabilizes, defined by the Frobenius norm: $\|\mathbf{X}^{(t)} - \mathbf{X}^{(t-1)}\|_F < \epsilon$.
 
