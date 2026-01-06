@@ -18,11 +18,16 @@ authors:
   - name: Tao Cui
     orcid: 0000-0001-9853-9423
     affiliation: 2
+  - name: Savannah Miller
+    orcid: 0000-0003-2231-3510
+    affiliation: 3
 affiliations:
- - name: INTERA, Portugal
+ - name: INTERA Geosciences, Faro, Portugal
    index: 1
  - name: Office of Groundwater Impact Assessment, Brisbane, QLD, Australia
-   index: 2   
+   index: 2
+  - name: INTERA Geosciences, Perth, Australia
+   index: 3
 date: 12 November 2025
 bibliography: paper.bib
 ---
