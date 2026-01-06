@@ -26,7 +26,7 @@ affiliations:
    index: 1
  - name: Office of Groundwater Impact Assessment, Brisbane, QLD, Australia
    index: 2
-  - name: INTERA Geosciences, Perth, Australia
+ - name: INTERA Geosciences, Perth, Australia
    index: 3
 date: 12 November 2025
 bibliography: paper.bib
