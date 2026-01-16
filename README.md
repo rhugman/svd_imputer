@@ -1,6 +1,7 @@
 # SVD Time Series Imputer
 
 [![PyPI version](https://badge.fury.io/py/svd-imputer.svg)](https://badge.fury.io/py/svd-imputer)
+![PyPI downloads](https://img.shields.io/pypi/dm/svd_imputer.svg)
 [![Python versions](https://img.shields.io/pypi/pyversions/svd-imputer.svg)](https://pypi.org/project/svd-imputer/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
