@@ -11,44 +11,86 @@
   title={Multiple imputation for nonresponse in surveys},
   author={Rubin, Donald B},
   year={1987},
+  doi={10.1002/9780470316696},
+  isbn = {9780470316696},
   publisher={John Wiley \& Sons}
 }
 
 @article{troyanskaya2001missing,
-  title={Missing value estimation methods for DNA microarrays},
-  author={Troyanskaya, Olga and Cantor, Michael and Sherlock, Gavin and Brown, Pat and Hastie, Trevor and Tibshirani, Robert and Botstein, David and Altman, Russ B},
-  journal={Bioinformatics},
-  volume={17},
-  number={6},
-  pages={520--525},
-  year={2001},
-  publisher={Oxford University Press}
+    author = {Troyanskaya, Olga and Cantor, Michael and Sherlock, Gavin and Brown, Pat and Hastie, Trevor and Tibshirani, Robert and Botstein, David and Altman, Russ B.},
+    title = {Missing value estimation methods for DNA microarrays },
+    journal = {Bioinformatics},
+    volume = {17},
+    number = {6},
+    pages = {520-525},
+    year = {2001},
+    month = {06},
+    abstract = {Motivation: Gene expression microarray experiments can generate
+  data sets with multiple missing expression values. Unfortunately,
+  many algorithms for gene expression analysis require a complete
+  matrix of gene array values as input. For example, methods such as
+  hierarchical clustering and K-means clustering are not robust to
+  missing data, and may lose effectiveness even with a few missing
+  values. Methods for imputing missing data are needed, therefore, to
+  minimize the effect of incomplete data sets on analyses, and to
+  increase the range of data sets to which these algorithms can be
+  applied. In this report, we investigate automated methods for
+  estimating missing data.Results: We present a comparative study of several methods for
+  the estimation of missing values in gene microarray data. We
+  implemented and evaluated three methods: a Singular Value
+  Decomposition (SVD) based method (SVDimpute), weighted K-nearest
+  neighbors (KNNimpute), and row average. We evaluated the methods
+  using a variety of parameter settings and over different real data
+  sets, and assessed the robustness of the imputation methods to the
+  amount of missing data over the range of 1–20\% missing values.
+  We show that KNNimpute appears to provide a more robust and
+  sensitive method for missing value estimation than SVDimpute, and
+  both SVDimpute and KNNimpute surpass the commonly used row average
+  method (as well as filling missing values with zeros). We report
+  results of the comparative experiments and provide recommendations
+  and tools for accurate estimation of missing microarray data under a
+  variety of conditions.Availability: The software is available at http://smi-web.stanford.edu/projects/helix/pubs/impute/Contact: russ.altman@stanford.edu*To whom correspondence should be
+  addressed.},
+    issn = {1367-4803},
+    doi = {10.1093/bioinformatics/17.6.520},
+    url = {https://doi.org/10.1093/bioinformatics/17.6.520},
+    eprint = {https://academic.oup.com/bioinformatics/article-pdf/17/6/520/48837104/bioinformatics_17_6_520.pdf},
 }
+
+
+
+
 
 @article{candes2010matrix,
-  title={Matrix completion with noise},
-  author={Cand{\`e}s, Emmanuel J and Plan, Yaniv},
-  journal={Proceedings of the IEEE},
+  author={Candes, Emmanuel J. and Plan, Yaniv},
+  journal={Proceedings of the IEEE}, 
+  title={Matrix Completion With Noise}, 
+  year={2010},
   volume={98},
   number={6},
-  pages={925--936},
-  year={2010},
-  publisher={IEEE}
-}
+  pages={925-936},
+  keywords={Motion pictures;Compressed sensing;Linear matrix inequalities;Noise level;Frequency;Collaboration;Filtering;Machine learning;Remote sensing;Computer vision;Compressed sensing;duality in optimization;low-rank matrices;matrix completion;nuclear-norm minimization;oracle inequalities;semidefinite programming},
+  doi={10.1109/JPROC.2009.2035722}}
+
 
 @article{buuren2011mice,
-  title={mice: Multivariate imputation by chained equations in R},
-  author={Van Buuren, Stef and Groothuis-Oudshoorn, Karin},
-  journal={Journal of statistical software},
-  volume={45},
-  pages={1--67},
-  year={2011}
+ title={mice: Multivariate Imputation by Chained Equations in R},
+ volume={45},
+ url={https://www.jstatsoft.org/index.php/jss/article/view/v045i03},
+ doi={10.18637/jss.v045.i03},
+ abstract={The R package &amp;lt;b&amp;gt;mice&amp;lt;/b&amp;gt; imputes incomplete multivariate data by chained equations. The software mice 1.0 appeared in the year 2000 as an S-PLUS library, and in 2001 as an R package. mice 1.0 introduced predictor selection, passive imputation and automatic pooling. This article documents mice, which extends the functionality of mice 1.0 in several ways. In &amp;lt;b&amp;gt;mice&amp;lt;/b&amp;gt;, the analysis of imputed data is made completely general, whereas the range of models under which pooling works is substantially extended. &amp;lt;b&amp;gt;mice&amp;lt;/b&amp;gt; adds new functionality for imputing multilevel data, automatic predictor selection, data handling, post-processing imputed values, specialized pooling routines, model selection tools, and diagnostic graphs. Imputation of categorical data is improved in order to bypass problems caused by perfect prediction. Special attention is paid to transformations, sum scores, indices and interactions using passive imputation, and to the proper setup of the predictor matrix. &amp;lt;b&amp;gt;mice&amp;lt;/b&amp;gt; can be downloaded from the Comprehensive R Archive Network. This article provides a hands-on, stepwise approach to solve applied incomplete data problems.},
+ number={3},
+ journal={Journal of Statistical Software},
+ author={van Buuren, Stef and Groothuis-Oudshoorn, Karin},
+ year={2011},
+ pages={1–67}
 }
 
 @article{stekhoven2012missforest,
   title={MissForest—non-parametric missing value imputation for mixed-type data},
   author={Stekhoven, Daniel J and B{\"u}hlmann, Peter},
   journal={Bioinformatics},
+  doi={10.1093/bioinformatics/btr597},
   volume={28},
   number={1},
   pages={112--118},
@@ -57,19 +99,26 @@
 }
 
 @Manual{amelia,
-  title = {Amelia II: A Program for Missing Data},
-  author = {James Honaker and Gary King and Matthew Blackwell},
-  year = {2011},
-  note = {R package version 1.7.4},
-  url = {https://gking.harvard.edu/amelia}
+ title={Amelia II: A Program for Missing Data},
+ volume={45},
+ url={https://www.jstatsoft.org/index.php/jss/article/view/v045i07},
+ doi={10.18637/jss.v045.i07},
+ abstract={Amelia II is a complete R package for multiple imputation of missing data. The package implements a new expectation-maximization with bootstrapping algorithm that works faster, with larger numbers of variables, and is far easier to use, than various Markov chain Monte Carlo approaches, but gives essentially the same answers. The program also improves imputation models by allowing researchers to put Bayesian priors on individual cell values, thereby including a great deal of potentially valuable and extensive information. It also includes features to accurately impute cross-sectional datasets, individual time series, or sets of time series for different cross-sections. A full set of graphical diagnostics are also available. The program is easy to use, and the simplicity of the algorithm makes it far more robust; both a simple command line and extensive graphical user interface are included.},
+ number={7},
+ journal={Journal of Statistical Software},
+ author={Honaker, James and King, Gary and Blackwell, Matthew},
+ year={2011},
+ pages={1–47}
 }
 
 @article{pedregosa2011scikit,
-  title={Scikit-learn: Machine learning in Python},
-  author={Pedregosa, Fabian and Varoquaux, Ga{\"e}l and Gramfort, Alexandre and Michel, Vincent and Thirion, Bertrand and Grisel, Olivier and Blondel, Mathieu and Prettenhofer, Peter and Weiss, Ron and Dubourg, Vincent and others},
-  journal={Journal of machine learning research},
+  title={Scikit-learn: Machine Learning in {P}ython},
+  author={Pedregosa, F. and Varoquaux, G. and Gramfort, A. and Michel, V.
+          and Thirion, B. and Grisel, O. and Blondel, M. and Prettenhofer, P.
+          and Weiss, R. and Dubourg, V. and Vanderplas, J. and Passos, A. and
+          Cournapeau, D. and Brucher, M. and Perrot, M. and Duchesnay, E.},
+  journal={Journal of Machine Learning Research},
   volume={12},
-  number={Oct},
   pages={2825--2830},
   year={2011}
 }
@@ -83,33 +132,49 @@
 }
 
 @article{harris2020array,
-  title={Array programming with NumPy},
-  author={Harris, Charles R and Millman, K Jarrod and Van Der Walt, St{\'e}fan J and Gommers, Ralf and Virtanen, Pauli and Cournapeau, David and Wieser, Eric and Taylor, Julian and Berg, Sebastian and Smith, Nathaniel J and others},
-  journal={Nature},
-  volume={585},
-  number={7825},
-  pages={357--362},
-  year={2020},
-  publisher={Nature Publishing Group}
-}
+	abstract = {Array programming provides a powerful, compact and expressive syntax for accessing, manipulating and operating on data in vectors, matrices and higher-dimensional arrays. NumPy is the primary array programming library for the Python language. It has an essential role in research analysis pipelines in fields as diverse as physics, chemistry, astronomy, geoscience, biology, psychology, materials science, engineering, finance and economics. For example, in astronomy, NumPy was an important part of the software stack used in the discovery of gravitational waves1 and in the first imaging of a black hole2. Here we review how a few fundamental array concepts lead to a simple and powerful programming paradigm for organizing, exploring and analysing scientific data. NumPy is the foundation upon which the scientific Python ecosystem is constructed. It is so pervasive that several projects, targeting audiences with specialized needs, have developed their own NumPy-like interfaces and array objects. Owing to its central position in the ecosystem, NumPy increasingly acts as an interoperability layer between such array computation libraries and, together with its application programming interface (API), provides a flexible framework to support the next decade of scientific and industrial analysis.},
+	author = {Harris, Charles R. and Millman, K. Jarrod and van der Walt, St{\'e}fan J. and Gommers, Ralf and Virtanen, Pauli and Cournapeau, David and Wieser, Eric and Taylor, Julian and Berg, Sebastian and Smith, Nathaniel J. and Kern, Robert and Picus, Matti and Hoyer, Stephan and van Kerkwijk, Marten H. and Brett, Matthew and Haldane, Allan and del R{\'\i}o, Jaime Fern{\'a}ndez and Wiebe, Mark and Peterson, Pearu and G{\'e}rard-Marchant, Pierre and Sheppard, Kevin and Reddy, Tyler and Weckesser, Warren and Abbasi, Hameer and Gohlke, Christoph and Oliphant, Travis E.},
+	date = {2020/09/01},
+	date-added = {2026-01-16 16:44:52 +0000},
+	date-modified = {2026-01-16 16:44:52 +0000},
+	doi = {10.1038/s41586-020-2649-2},
+	id = {Harris2020},
+	isbn = {1476-4687},
+	journal = {Nature},
+	number = {7825},
+	pages = {357--362},
+	title = {Array programming with NumPy},
+	url = {https://doi.org/10.1038/s41586-020-2649-2},
+	volume = {585},
+	year = {2020},
+	bdsk-url-1 = {https://doi.org/10.1038/s41586-020-2649-2}
+  }
+
 
 @article{mazumder2010spectral,
-  title={Spectral regularization algorithms for learning large incomplete matrices},
-  author={Mazumder, Rahul and Hastie, Trevor and Tibshirani, Robert},
-  journal={Journal of machine learning research},
-  volume={11},
-  number={Aug},
-  pages={2287--2322},
-  year={2010}
+  author = {Mazumder, Rahul and Hastie, Trevor and Tibshirani, Robert},
+  title = {Spectral Regularization Algorithms for Learning Large Incomplete Matrices},
+  year = {2010},
+  issue_date = {3/1/2010},
+  publisher = {JMLR.org},
+  volume = {11},
+  issn = {1532-4435},
+  abstract = {We use convex relaxation techniques to provide a sequence of regularized low-rank solutions for large-scale matrix completion problems. Using the nuclear norm as a regularizer, we provide a simple and very efficient convex algorithm for minimizing the reconstruction error subject to a bound on the nuclear norm. Our algorithm SOFT-IMPUTE iteratively replaces the missing elements with those obtained from a soft-thresholded SVD. With warm starts this allows us to efficiently compute an entire regularization path of solutions on a grid of values of the regularization parameter. The computationally intensive part of our algorithm is in computing a low-rank SVD of a dense matrix. Exploiting the problem structure, we show that the task can be performed with a complexity of order linear in the matrix dimensions. Our semidefinite-programming algorithm is readily scalable to large matrices; for example SOFT-IMPUTE takes a few hours to compute low-rank approximations of a 106 X 106 incomplete matrix with 107 observed entries, and fits a rank-95 approximation to the full Netflix training set in 3.3 hours. Our methods achieve good training and test errors and exhibit superior timings when compared to other competitive state-of-the-art techniques.},
+  journal = {J. Mach. Learn. Res.},
+  month = aug,
+  pages = {2287–2322},
+  numpages = {36}
 }
 
 @article{efron1979bootstrap,
-  title={Bootstrap methods: another look at the jackknife},
-  author={Efron, Bradley},
-  journal={The annals of Statistics},
-  pages={1--26},
-  year={1979},
-  publisher={JSTOR}
+    author = "Efron, B.",
+    title = "{Bootstrap Methods: Another Look at the Jackknife}",
+    doi = "10.1214/aos/1176344552",
+    journal = "Annals Statist.",
+    volume = "7",
+    number = "1",
+    pages = "1--26",
+    year = "1979"
 }
 
 @Article{Olivoto2020,
