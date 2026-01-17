@@ -19,7 +19,6 @@ authors:
     orcid: 0000-0001-9853-9423
     affiliation: 2
   - name: Savannah Miller
-    orcid: 0000-0003-2231-3510
     affiliation: 3
 affiliations:
  - name: INTERA Geosciences, Faro, Portugal
