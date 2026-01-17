@@ -19,6 +19,7 @@ authors:
     orcid: 0000-0001-9853-9423
     affiliation: 2
   - name: Savannah Miller
+    orcid: 0000-0003-2231-3510
     affiliation: 3
 affiliations:
  - name: INTERA Geosciences, Faro, Portugal
@@ -58,8 +59,8 @@ Matrix completion methods based on low-rank approximations offer a middle ground
 
 * **Enhancing Data Continuity:** It enables the robust calculation of long-term indices (e.g., drought indices) and the interpolation of spatial distributions, which require seamless data during specific periods.
 * **Improving Physical Modeling:** By generating spatio-temporally varying inputs without gaps, the software supports the definition of accurate boundary conditions for numerical models.
-* **Surpassing Univariate Limitations:** Unlike commonly applied univariate methods, `svd_imputer` exploits the strong spatial and temporal correlations inherent in environmental timeseries data to reconstruct missing values, extracting relationships from high-quality measurements to fill gaps in lower-quality series.
-* **Enabling Risk-Based Analysis:** The inclusion of uncertainty quantification ensures that practitioners can propagate imputation uncertainty into downstream physical models, a crucial capability for risk-based decision-making that is often absent in standard tools.
+* **Surpassing Univariate Limitations:** Unlike traditional univariate methods, `svd_imputer` exploits the strong spatial and temporal correlations inherent in environmental networks to reconstruct missing values, extracting relationships from high-quality measurements to fill gaps in lower-quality series.
+* **Enabling Risk-Based Analysis:** The inclusion of uncertainty quantification ensures that researchers can propagate imputation errors into downstream physical models, a crucial capability for risk-based decision-making that is often absent in standard tools.
 * **Democratizing Advanced Methods:** The package bridges the gap between complex matrix completion theory and practical application, allowing practitioners to implement advanced multivariate imputation without building custom software architectures.
 
 # Software Design
@@ -74,7 +75,7 @@ Key design elements include:
 * **Algorithmic Core:** The imputation engine implements an Expectation-Maximization (EM) workflow that iteratively updates missing entries using Singular Value Decomposition (SVD) until the matrix convergence stabilizes based on the Frobenius norm.
 * **Uncertainty Integration:** The design natively incorporates uncertainty quantification, supporting both Multiple Imputation (aggregating independent completed matrices via Rubin’s Rules) and Monte Carlo Bootstrap-Validation to estimate reconstruction errors.
 
-The `svd_imputer` package adapts the workflow introduced by [@burcet2025iah], extends it to include uncertainty quantification, and addresses limitations in existing Python implementations by providing:
+The `svd_imputer` package implements the workflow introduced by [@burcet2025iah], extends it to include uncertainty quantification, and addresses limitations in existing Python implementations by providing:
 
 - **Automatic rank estimation** via variance thresholds or cross-validation.
 - **Uncertainty quantification** via Multiple Imputation and Rubin's Rules [@rubin1987multiple], allowing practitioners to propagate imputation error into downstream physical models.
@@ -136,3 +137,16 @@ df_imputed, df_std = imputer.fit_transform(
     return_uncertainty=True,
     n_imputations=10
 )
+```
+
+\autoref{fig:1} illustrates the imputer's performance across four synthetic sites with varying correlation structures. The truth (solid black) represents the held-back data, while the imputed values (dashed red) fill the gaps created for validation solely based on SVD using the input data (blue dots). The shaded grey region represents the 95% confidence interval, derived from $M=10$ imputations using Rubin’s Rules to account for both model and residual uncertainty. Note that for Series_D, which lacks correlation with other sites, the gap is successfully recovered using derivative-based and time-lag data augmentation.
+
+# Final remarks
+
+The svd_imputer package offers a streamlined, Python-based workflow designed to bridge the gap between complex matrix completion theory and practical environmental application. By providing a ready-to-use pipeline, it allows practitioners to implement advanced multivariate imputation without the overhead of building custom software architectures.
+
+Beyond simple data filling, the tool’s ability to generate robust error estimates represents a significant step forward for hydrological modeling. In fields where analyses directly inform risk-based decision-making, understanding the reliability of imputed data is just as important as the data itself. svd_imputer ensures that this uncertainty is no longer an afterthought but a core component of the data preparation process.
+
+Future improvements include exploring approaches to integrating temporal-covarince in informing imputed values, implementing "round robin" or "sequential imputation" workflows to maximize information gain whilst minizing the inflluence of noise.AcknowledgementsWe thank the JOSS editors and reviewers for their constructive comments improving both the package and paper.AI usage disclosureThe authors declare that no generative AI tools were used in the development of the software or the writing of this paper.
+
+# References
